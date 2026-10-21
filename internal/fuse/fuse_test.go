@@ -80,20 +80,20 @@ func TestInitializeSaysHowToConnectWhatIsNotConnected(t *testing.T) {
 
 // invariant: a backend never sees the token the caller presented, only its own, issued for it.
 func TestEachBackendGetsItsOwnTokenAndNothingElse(t *testing.T) {
-	quvi := newMCP(t, &fakeMCP{sessions: true, tools: []string{"AskData"}, callReply: map[string]string{"AskData": `{"jsonrpc":"2.0","id":5,"result":{}}`}})
-	exec := newMCP(t, &fakeMCP{tools: []string{"CreateVoucher"}, callReply: map[string]string{"CreateVoucher": `{"jsonrpc":"2.0","id":6,"result":{}}`}})
-	w := newWorld(t, nil, quvi, exec)
+	sessionful := newMCP(t, &fakeMCP{sessions: true, tools: []string{"Search"}, callReply: map[string]string{"Search": `{"jsonrpc":"2.0","id":5,"result":{}}`}})
+	plain := newMCP(t, &fakeMCP{tools: []string{"CreateOrder"}, callReply: map[string]string{"CreateOrder": `{"jsonrpc":"2.0","id":6,"result":{}}`}})
+	w := newWorld(t, nil, sessionful, plain)
 	w.connect("alice", aliceToken, "b0")
 	w.connect("alice", aliceToken, "b1")
 
 	w.post(aliceToken, initBody, map[string]string{"Cookie": "a=b", "X-Tenant": "acme", "X-Forwarded-For": "9.9.9.9", "Mcp-Session-Id": "client-made-this"})
 	w.post(aliceToken, listBody, nil)
-	w.post(aliceToken, callBody(5, "AskData"), nil)
-	w.post(aliceToken, callBody(6, "CreateVoucher"), nil)
+	w.post(aliceToken, callBody(5, "Search"), nil)
+	w.post(aliceToken, callBody(6, "CreateOrder"), nil)
 
 	allowed := map[string]bool{"Accept": true, "Accept-Encoding": true, "Authorization": true, "Content-Length": true,
 		"Content-Type": true, "Mcp-Protocol-Version": true, "Mcp-Session-Id": true, "User-Agent": true, "X-Request-Id": true}
-	for name, b := range map[string]*fakeMCP{"quvi": quvi, "exec": exec} {
+	for name, b := range map[string]*fakeMCP{"orders": sessionful, "plain": plain} {
 		seen := b.allRequests()
 		if len(seen) == 0 {
 			t.Fatalf("%s saw nothing", name)
@@ -121,8 +121,8 @@ func TestEachBackendGetsItsOwnTokenAndNothingElse(t *testing.T) {
 			}
 		}
 	}
-	qt := quvi.requests("tools/call")[0].header.Get("Authorization")
-	et := exec.requests("tools/call")[0].header.Get("Authorization")
+	qt := sessionful.requests("tools/call")[0].header.Get("Authorization")
+	et := plain.requests("tools/call")[0].header.Get("Authorization")
 	if qt == et {
 		t.Error("both backends were sent the same token")
 	}
@@ -228,8 +228,8 @@ func TestConnectBeginsWithProofOfWhoIsConnecting(t *testing.T) {
 // The ticket says whom a link was made for; it proves nothing about who opens it. A link forwarded to someone else
 // must not store that person's token under the first person's name.
 func TestALinkOpenedByAnotherPersonConnectsNothing(t *testing.T) {
-	exec := newMCP(t, &fakeMCP{tools: []string{"T"}})
-	w := newWorld(t, nil, exec)
+	plain := newMCP(t, &fakeMCP{tools: []string{"T"}})
+	w := newWorld(t, nil, plain)
 	link := w.linkFor(aliceToken, "b0") // made for alice
 
 	w.as.setLogin("bob") // ... but bob is the one signed in at the browser that opens it
@@ -246,7 +246,7 @@ func TestALinkOpenedByAnotherPersonConnectsNothing(t *testing.T) {
 			t.Errorf("%s ended up with a connection", who)
 		}
 	}
-	if len(exec.allRequests()) != 0 {
+	if len(plain.allRequests()) != 0 {
 		t.Error("the backend was contacted for a link its holder was not entitled to")
 	}
 	if !strings.Contains(w.logs.String(), "not the one the link was made for") {
@@ -257,8 +257,8 @@ func TestALinkOpenedByAnotherPersonConnectsNothing(t *testing.T) {
 // Proving who is connecting at the start is not enough: the backend's sign-in URL can be handed to someone else.
 // The flow has to be finished in the browser it began in.
 func TestAFlowIsFinishedOnlyInTheBrowserItBegan(t *testing.T) {
-	exec := newMCP(t, &fakeMCP{tools: []string{"T"}})
-	w := newWorld(t, nil, exec)
+	plain := newMCP(t, &fakeMCP{tools: []string{"T"}})
+	w := newWorld(t, nil, plain)
 	link := w.linkFor(aliceToken, "b0")
 
 	// alice (really alice) opens the link and gets as far as the backend's sign-in, then passes that URL on.
@@ -318,9 +318,9 @@ func TestOneRegistrationPerAuthorizationServerAndBackend(t *testing.T) {
 // ---- serving ------------------------------------------------------------------------------------------------------
 
 func TestMergedViewAfterConnecting(t *testing.T) {
-	quvi := newMCP(t, &fakeMCP{sessions: true, protocol: "2025-06-18", instructions: "ask me", caps: `{"tools":{"listChanged":false},"resources":{}}`, tools: []string{"AskData", "Shared"}})
-	exec := newMCP(t, &fakeMCP{protocol: "2025-03-26", instructions: "do things", caps: `{"tools":{"listChanged":true},"prompts":{}}`, tools: []string{"CreateVoucher", "Shared"}})
-	w := newWorld(t, nil, quvi, exec)
+	sessionful := newMCP(t, &fakeMCP{sessions: true, protocol: "2025-06-18", instructions: "ask me", caps: `{"tools":{"listChanged":false},"resources":{}}`, tools: []string{"Search", "Shared"}})
+	plain := newMCP(t, &fakeMCP{protocol: "2025-03-26", instructions: "do things", caps: `{"tools":{"listChanged":true},"prompts":{}}`, tools: []string{"CreateOrder", "Shared"}})
+	w := newWorld(t, nil, sessionful, plain)
 	w.connect("alice", aliceToken, "b0")
 	w.connect("alice", aliceToken, "b1")
 
@@ -350,7 +350,7 @@ func TestMergedViewAfterConnecting(t *testing.T) {
 	}
 
 	_, data = w.post(aliceToken, listBody, nil)
-	if got := strings.Join(toolNames(t, data), ","); got != "AskData,Shared,CreateVoucher" {
+	if got := strings.Join(toolNames(t, data), ","); got != "Search,Shared,CreateOrder" {
 		t.Fatalf("tools = %s (the earlier backend keeps a shared name)", got)
 	}
 	if !strings.Contains(w.logs.String(), `"dropped":"b1"`) {
@@ -361,24 +361,24 @@ func TestMergedViewAfterConnecting(t *testing.T) {
 // invariant: a tool call's request and reply pass through byte for byte, whatever is in them.
 func TestToolCallsPassThroughUntouched(t *testing.T) {
 	exact := "{ \"jsonrpc\" : \"2.0\",\n\"id\":7,  \"result\":{\"content\":[{\"type\":\"text\",\"text\":\"안녕  \\u00e9 12345678901234567890.10\"}],\"isError\":false} }\n"
-	exec := newMCP(t, &fakeMCP{tools: []string{"CreateVoucher"}, callReply: map[string]string{"CreateVoucher": exact}})
-	w := newWorld(t, nil, exec)
+	plain := newMCP(t, &fakeMCP{tools: []string{"CreateOrder"}, callReply: map[string]string{"CreateOrder": exact}})
+	w := newWorld(t, nil, plain)
 	w.connect("alice", aliceToken, "b0")
 
-	sent := `{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"CreateVoucher","arguments":{"sql":"SELECT  1","big":12345678901234567890}}}`
+	sent := `{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"CreateOrder","arguments":{"sql":"SELECT  1","big":12345678901234567890}}}`
 	resp, data := w.post(aliceToken, sent, nil)
 	if resp.StatusCode != 200 || sha256.Sum256(data) != sha256.Sum256([]byte(exact)) {
 		t.Fatalf("reply was changed:\n got %q\nwant %q", data, exact)
 	}
-	got := exec.requests("tools/call")
+	got := plain.requests("tools/call")
 	if len(got) != 1 || string(got[0].body) != sent {
 		t.Fatalf("backend saw %q", got)
 	}
 }
 
 func TestEachPersonSeesOnlyWhatTheyConnected(t *testing.T) {
-	exec := newMCP(t, &fakeMCP{tools: []string{"CreateVoucher"}, callReply: map[string]string{"CreateVoucher": `{"jsonrpc":"2.0","id":1,"result":{}}`}})
-	w := newWorld(t, nil, exec)
+	plain := newMCP(t, &fakeMCP{tools: []string{"CreateOrder"}, callReply: map[string]string{"CreateOrder": `{"jsonrpc":"2.0","id":1,"result":{}}`}})
+	w := newWorld(t, nil, plain)
 	w.connect("alice", aliceToken, "b0")
 
 	_, data := w.post(aliceToken, listBody, nil)
@@ -389,7 +389,7 @@ func TestEachPersonSeesOnlyWhatTheyConnected(t *testing.T) {
 	if got := toolNames(t, data); len(got) != 0 {
 		t.Errorf("bob connected nothing but sees %v", got)
 	}
-	_, data = w.post(bobToken, callBody(1, "CreateVoucher"), nil)
+	_, data = w.post(bobToken, callBody(1, "CreateOrder"), nil)
 	if !strings.Contains(string(data), "unknown tool") {
 		t.Errorf("bob can call alice's tool: %s", data)
 	}
@@ -399,7 +399,7 @@ func TestEachPersonSeesOnlyWhatTheyConnected(t *testing.T) {
 		t.Errorf("bob after connecting: %v", got)
 	}
 	subs := map[string]bool{}
-	for _, s := range exec.allRequests() {
+	for _, s := range plain.allRequests() {
 		w.as.mu.Lock()
 		subs[w.as.tokens[strings.TrimPrefix(s.header.Get("Authorization"), "Bearer ")].sub] = true
 		w.as.mu.Unlock()
@@ -410,8 +410,8 @@ func TestEachPersonSeesOnlyWhatTheyConnected(t *testing.T) {
 }
 
 func TestExpiredTokensAreRefreshedAndARevokedGrantAsksToConnectAgain(t *testing.T) {
-	exec := newMCP(t, &fakeMCP{tools: []string{"T"}, callReply: map[string]string{"T": `{"jsonrpc":"2.0","id":1,"result":{}}`}})
-	w := newWorld(t, nil, exec)
+	plain := newMCP(t, &fakeMCP{tools: []string{"T"}, callReply: map[string]string{"T": `{"jsonrpc":"2.0","id":1,"result":{}}`}})
+	w := newWorld(t, nil, plain)
 	w.as.mu.Lock()
 	w.as.expiresIn = 10 // inside the refresh margin: every use must refresh
 	w.as.mu.Unlock()
@@ -428,7 +428,7 @@ func TestExpiredTokensAreRefreshedAndARevokedGrantAsksToConnectAgain(t *testing.
 		t.Error("an expiring token was used without refreshing it")
 	}
 	tokens := map[string]bool{}
-	for _, s := range exec.requests("tools/call") {
+	for _, s := range plain.requests("tools/call") {
 		tokens[s.header.Get("Authorization")] = true
 	}
 	if len(tokens) < 2 {
@@ -452,16 +452,16 @@ func TestExpiredTokensAreRefreshedAndARevokedGrantAsksToConnectAgain(t *testing.
 }
 
 func TestBackendThatRefusesTheTokenDropsTheGrant(t *testing.T) {
-	exec := newMCP(t, &fakeMCP{tools: []string{"T"}})
-	w := newWorld(t, nil, exec)
+	plain := newMCP(t, &fakeMCP{tools: []string{"T"}})
+	w := newWorld(t, nil, plain)
 	w.connect("alice", aliceToken, "b0")
 	person := mustPerson(t, w, "alice")
 	if !w.f.connected(person, 0) {
 		t.Fatal("not connected after connecting")
 	}
-	exec.mu.Lock()
-	exec.revoke = true
-	exec.mu.Unlock()
+	plain.mu.Lock()
+	plain.revoke = true
+	plain.mu.Unlock()
 
 	_, data := w.post(aliceToken, listBody, nil)
 	if got := toolNames(t, data); len(got) != 0 {
@@ -475,16 +475,16 @@ func TestBackendThatRefusesTheTokenDropsTheGrant(t *testing.T) {
 // ---- sessions are between mcp-fuse and the backend ---------------------------------------------------------------
 
 func TestSessionsAreOpenedAndRestoredByMcpFuse(t *testing.T) {
-	quvi := newMCP(t, &fakeMCP{sessions: true, tools: []string{"AskData"}, callReply: map[string]string{"AskData": `{"jsonrpc":"2.0","id":1,"result":{}}`}})
-	w := newWorld(t, nil, quvi)
+	sessionful := newMCP(t, &fakeMCP{sessions: true, tools: []string{"Search"}, callReply: map[string]string{"Search": `{"jsonrpc":"2.0","id":1,"result":{}}`}})
+	w := newWorld(t, nil, sessionful)
 	w.connect("alice", aliceToken, "b0")
 
 	w.post(aliceToken, initBody, nil)
-	resp, data := w.post(aliceToken, callBody(1, "AskData"), map[string]string{"Mcp-Session-Id": "client-made-this"})
+	resp, data := w.post(aliceToken, callBody(1, "Search"), map[string]string{"Mcp-Session-Id": "client-made-this"})
 	if resp.StatusCode != 200 || resp.Header.Get("Mcp-Session-Id") != "" {
 		t.Fatalf("%d %v %s", resp.StatusCode, resp.Header, data)
 	}
-	for _, s := range quvi.requests("tools/call") {
+	for _, s := range sessionful.requests("tools/call") {
 		if id := s.header.Get("Mcp-Session-Id"); id == "" || id == "client-made-this" {
 			t.Errorf("backend session header = %q, want mcp-fuse's own", id)
 		}
@@ -493,13 +493,13 @@ func TestSessionsAreOpenedAndRestoredByMcpFuse(t *testing.T) {
 		}
 	}
 
-	inits := len(quvi.requests("initialize"))
-	quvi.forgetSessions()
-	resp, data = w.post(aliceToken, callBody(1, "AskData"), nil)
+	inits := len(sessionful.requests("initialize"))
+	sessionful.forgetSessions()
+	resp, data = w.post(aliceToken, callBody(1, "Search"), nil)
 	if resp.StatusCode != 200 || !strings.Contains(string(data), `"result"`) {
 		t.Fatalf("after the backend lost its sessions: %d %s", resp.StatusCode, data)
 	}
-	if len(quvi.requests("initialize")) != inits+1 {
+	if len(sessionful.requests("initialize")) != inits+1 {
 		t.Error("a fresh session should have been opened once")
 	}
 }
@@ -507,10 +507,10 @@ func TestSessionsAreOpenedAndRestoredByMcpFuse(t *testing.T) {
 // ---- what is not served ------------------------------------------------------------------------------------------
 
 func TestNewerRevisionIsRefusedSoClientsFallBack(t *testing.T) {
-	exec := newMCP(t, &fakeMCP{tools: []string{"T"}})
-	w := newWorld(t, nil, exec)
+	plain := newMCP(t, &fakeMCP{tools: []string{"T"}})
+	w := newWorld(t, nil, plain)
 	w.connect("alice", aliceToken, "b0")
-	n := len(exec.allRequests())
+	n := len(plain.allRequests())
 
 	resp, data := w.post(aliceToken, listBody, map[string]string{"MCP-Protocol-Version": "2026-07-28"})
 	if resp.StatusCode != http.StatusBadRequest {
@@ -520,7 +520,7 @@ func TestNewerRevisionIsRefusedSoClientsFallBack(t *testing.T) {
 	if json.Unmarshal(data, &env) == nil && len(env.Error) > 0 {
 		t.Errorf("the refusal must not look like a modern JSON-RPC error, or the client will not fall back: %s", data)
 	}
-	if len(exec.allRequests()) != n {
+	if len(plain.allRequests()) != n {
 		t.Error("a refused request must not reach the backends")
 	}
 	for _, v := range []string{"2025-11-25", "2025-06-18", "2025-03-26", ""} {
@@ -573,8 +573,8 @@ func TestMetadataAndHealth(t *testing.T) {
 // ---- merging details ---------------------------------------------------------------------------------------------
 
 func TestListReadsEventStreamRepliesAndToleratesAMissingPromptsMethod(t *testing.T) {
-	exec := newMCP(t, &fakeMCP{tools: []string{"Streamed"}, sse: true})
-	w := newWorld(t, nil, exec)
+	plain := newMCP(t, &fakeMCP{tools: []string{"Streamed"}, sse: true})
+	w := newWorld(t, nil, plain)
 	w.connect("alice", aliceToken, "b0")
 	_, data := w.post(aliceToken, listBody, nil)
 	if got := strings.Join(toolNames(t, data), ","); got != "Streamed" {
@@ -601,9 +601,9 @@ func TestOneBackendDownLeavesTheRest(t *testing.T) {
 }
 
 func TestCancellationReachesBackendsThatHaveASession(t *testing.T) {
-	quvi := newMCP(t, &fakeMCP{sessions: true, tools: []string{"A"}})
-	exec := newMCP(t, &fakeMCP{tools: []string{"B"}})
-	w := newWorld(t, nil, quvi, exec)
+	sessionful := newMCP(t, &fakeMCP{sessions: true, tools: []string{"A"}})
+	plain := newMCP(t, &fakeMCP{tools: []string{"B"}})
+	w := newWorld(t, nil, sessionful, plain)
 	w.connect("alice", aliceToken, "b0")
 	w.connect("alice", aliceToken, "b1")
 	w.post(aliceToken, initBody, nil)
@@ -612,12 +612,12 @@ func TestCancellationReachesBackendsThatHaveASession(t *testing.T) {
 	if resp.StatusCode != 202 {
 		t.Fatalf("status %d", resp.StatusCode)
 	}
-	if len(quvi.requests("notifications/cancelled")) != 1 || len(exec.requests("notifications/cancelled")) != 1 {
+	if len(sessionful.requests("notifications/cancelled")) != 1 || len(plain.requests("notifications/cancelled")) != 1 {
 		t.Error("a cancellation must reach every backend that has a session")
 	}
-	n := len(quvi.requests("notifications/initialized"))
+	n := len(sessionful.requests("notifications/initialized"))
 	w.post(aliceToken, `{"jsonrpc":"2.0","method":"notifications/initialized"}`, nil)
-	if len(quvi.requests("notifications/initialized")) != n {
+	if len(sessionful.requests("notifications/initialized")) != n {
 		t.Error("the caller's initialized notification was passed on")
 	}
 }
@@ -659,8 +659,8 @@ func TestBackendsWithoutAuthAreUsedWithoutAToken(t *testing.T) {
 func TestLogsCarryNoBodiesAndNoTokens(t *testing.T) {
 	secret := "SELECT salary FROM payroll WHERE ssn = '900101-1234567'"
 	reply := `{"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text","text":"홍길동 연봉 99,000,000"}]}}`
-	exec := newMCP(t, &fakeMCP{tools: []string{"Query"}, callReply: map[string]string{"Query": reply}})
-	w := newWorld(t, nil, exec)
+	plain := newMCP(t, &fakeMCP{tools: []string{"Query"}, callReply: map[string]string{"Query": reply}})
+	w := newWorld(t, nil, plain)
 	w.as.mu.Lock()
 	w.as.expiresIn = 10
 	w.as.mu.Unlock()
@@ -723,15 +723,15 @@ func mustPerson(t *testing.T, w *world, sub string) string {
 // The request id is the one header besides the protocol's that a backend is sent. A caller's own id is passed on
 // only if it is plainly an id.
 func TestRequestIDIsPassedOnOnlyWhenItIsPlainlyAnID(t *testing.T) {
-	exec := newMCP(t, &fakeMCP{tools: []string{"T"}})
-	w := newWorld(t, nil, exec)
+	plain := newMCP(t, &fakeMCP{tools: []string{"T"}})
+	w := newWorld(t, nil, plain)
 	w.connect("alice", aliceToken, "b0")
 
 	w.post(aliceToken, listBody, map[string]string{"X-Request-Id": "req-42.a_b"})
 	w.post(aliceToken, listBody, map[string]string{"X-Request-Id": "bad id; drop table"})
 	w.post(aliceToken, listBody, nil)
 	var ids []string
-	for _, s := range exec.requests("tools/list") {
+	for _, s := range plain.requests("tools/list") {
 		ids = append(ids, s.header.Get("X-Request-Id"))
 	}
 	if len(ids) != 3 || ids[0] != "req-42.a_b" {
@@ -747,14 +747,14 @@ func TestRequestIDIsPassedOnOnlyWhenItIsPlainlyAnID(t *testing.T) {
 // A client pre-registered at the backend's authorization server, with a secret: no self-registration, and the
 // secret authenticates the client at the token endpoint for the code and for every refresh.
 func TestPreRegisteredConfidentialClient(t *testing.T) {
-	exec := newMCP(t, &fakeMCP{tools: []string{"T"}, callReply: map[string]string{"T": `{"jsonrpc":"2.0","id":1,"result":{}}`}})
+	plain := newMCP(t, &fakeMCP{tools: []string{"T"}, callReply: map[string]string{"T": `{"jsonrpc":"2.0","id":1,"result":{}}`}})
 	w := newWorldWith(t, nil, func(c *config.Config, d *Deps, as *fakeAS) {
 		c.Backends[0].ClientID = "pre-registered"
 		c.Backends[0].ClientSecretFile = "unused-in-tests"
 		d.ClientSecrets["b0"] = "pre-secret"
 		as.confidential["pre-registered"] = "pre-secret"
 		as.expiresIn = 10 // forces a refresh, which must authenticate too
-	}, exec)
+	}, plain)
 	w.connect("alice", aliceToken, "b0")
 	if _, regs, _ := w.as.snapshot(); regs != 0 {
 		t.Errorf("a pre-registered client must not register itself, registrations = %d", regs)
@@ -787,7 +787,7 @@ func TestConfidentialClientWithAWrongSecretCannotConnect(t *testing.T) {
 }
 
 func TestSecretInTheBodyWhenTheServerOnlyTakesThat(t *testing.T) {
-	exec := newMCP(t, &fakeMCP{tools: []string{"T"}})
+	plain := newMCP(t, &fakeMCP{tools: []string{"T"}})
 	w := newWorldWith(t, nil, func(c *config.Config, d *Deps, as *fakeAS) {
 		c.Backends[0].ClientID = "pre-registered"
 		c.Backends[0].ClientSecretFile = "unused-in-tests"
@@ -795,6 +795,6 @@ func TestSecretInTheBodyWhenTheServerOnlyTakesThat(t *testing.T) {
 		as.confidential["pre-registered"] = "pre-secret"
 		as.authMethods = []string{"client_secret_post"}
 		as.secretInBody = true
-	}, exec)
+	}, plain)
 	w.connect("alice", aliceToken, "b0")
 }

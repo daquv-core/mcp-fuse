@@ -1,0 +1,31 @@
+# /etc/systemd/system/mcp-fuse.service
+[Unit]
+Description=mcp-fuse - presents several MCP servers as one
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/local/bin/mcp-fuse -config /etc/mcp-fuse/config.json
+User=mcp-fuse
+Group=mcp-fuse
+Restart=on-failure
+RestartSec=2
+# TimeoutStopSec leaves in-flight tool calls the 30 seconds mcp-fuse gives them on SIGTERM.
+TimeoutStopSec=40
+
+# The grants file lives here: /var/lib/mcp-fuse, owned by the service user.
+StateDirectory=mcp-fuse
+StateDirectoryMode=0700
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6
+CapabilityBoundingSet=
+
+[Install]
+WantedBy=multi-user.target

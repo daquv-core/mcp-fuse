@@ -15,8 +15,8 @@ func validConfig() Config {
 		StateFile:            "/var/lib/mcp-fuse/state.bin",
 		SecretFile:           "/etc/mcp-fuse/secret",
 		Backends: []Backend{
-			{Name: "quvi", URL: "http://127.0.0.1:8081/mcp"},
-			{Name: "exec", URL: "http://127.0.0.1:9000/mcp"},
+			{Name: "orders", URL: "http://127.0.0.1:8081/mcp"},
+			{Name: "plain", URL: "http://127.0.0.1:9000/mcp"},
 		},
 	}
 }
@@ -38,11 +38,11 @@ func TestConfigDerivesPathsAndDefaults(t *testing.T) {
 
 func TestConfigRejects(t *testing.T) {
 	cases := map[string]func(*Config){
-		"duplicate name":            func(c *Config) { c.Backends[1].Name = "quvi" },
+		"duplicate name":            func(c *Config) { c.Backends[1].Name = "orders" },
 		"no backends":               func(c *Config) { c.Backends = nil },
 		"no auth server":            func(c *Config) { c.AuthorizationServers = nil },
 		"relative resource":         func(c *Config) { c.Resource = "/mcp" },
-		"bad backend url":           func(c *Config) { c.Backends[0].URL = "quvi:8081" },
+		"bad backend url":           func(c *Config) { c.Backends[0].URL = "sessionful:8081" },
 		"empty name":                func(c *Config) { c.Backends[0].Name = "" },
 		"name with a slash":         func(c *Config) { c.Backends[0].Name = "a/b" },
 		"unknown backend auth":      func(c *Config) { c.Backends[0].Auth = "basic" },
@@ -50,7 +50,7 @@ func TestConfigRejects(t *testing.T) {
 		"introspection no client":   func(c *Config) { c.Auth.ClientID = "" },
 		"oauth without state file":  func(c *Config) { c.StateFile = "" },
 		"oauth without secret file": func(c *Config) { c.SecretFile = "" },
-		"client secret, no id":      func(c *Config) { c.Backends[0].ClientSecretFile = "/etc/mcp-fuse/quvi-secret" },
+		"client secret, no id":      func(c *Config) { c.Backends[0].ClientSecretFile = "/etc/mcp-fuse/sessionful-secret" },
 	}
 	for name, mutate := range cases {
 		c := validConfig()
@@ -82,7 +82,7 @@ func TestConfigFileRejectsUnknownKeys(t *testing.T) {
 }
 
 func TestExampleConfigIsValid(t *testing.T) {
-	if _, err := Load("../../config.example.json"); err != nil {
+	if _, err := Load("../../examples/config.json"); err != nil {
 		t.Fatal(err)
 	}
 }
