@@ -19,16 +19,42 @@ that user may do. Section 1 lists what it takes.
 
 ### Where the authorization server comes from
 
-- **You already have one that follows the standard.** Check it against sections 1 and 2 and the two points below, and use it.
-- **You build one.** You take on the authorization endpoint with PKCE `S256`; the token endpoint with refresh tokens and
+If you do not already have an authorization server that follows the standard, **we recommend running
+[Keycloak](https://github.com/keycloak/keycloak)**. It is open source (Apache 2.0), it does all of the authorization-server
+work in the table above, and it documents how to serve MCP
+([Keycloak's MCP guide](https://www.keycloak.org/securing-apps/mcp-authz-server)). Building your own is possible and is
+described below, but it is security-sensitive code that you review and patch for as long as the product lives.
+
+#### If you use Keycloak, you
+
+1. **Run it and keep it.** Give it a production database and protect its backups: besides the realm's configuration and
+   users, a default setup keeps the realm's signing keys there. Plan for upgrades: Keycloak supports its latest minor
+   release ([release policy](https://github.com/keycloak/keycloak/blob/main/RELEASES.md)).
+2. **Connect your existing sign-in to it.** Add your sign-in as an identity provider through OpenID Connect, or put a small
+   bridge in front of it if your sign-in is not OpenID Connect.
+3. **Make mcp-fuse a client of it:** authorization code with PKCE `S256`, refresh tokens, redirect URI
+   `<mcp-fuse resource origin><resource path>/connect/callback`. Dynamic client registration exists but is closed to
+   anonymous requests by default; create the client by hand (and give mcp-fuse its `client_id`, section 3) or issue an
+   initial access token.
+4. **Make the audience your server's URL.** Keycloak's guide shows how: a client scope with an *Audience* mapper whose
+   *Included Custom Audience* is your server's URL, requested through `scope` (list that scope in your protected resource
+   metadata as `scopes_supported`, which is what mcp-fuse asks for when the challenge names none). Keycloak can also act
+   on the `resource` parameter itself; its guide says which release has it and how it is enabled. Why this needs
+   checking is the first of the two points below.
+5. **Make the identity claim trustworthy.** If your server identifies people by their email address, accept only the
+   address your identity provider verifies (the identity provider's *trust email* setting) and do not let users change
+   their own address (the *email* attribute's edit permission in the realm's user profile). Your server acts on that value;
+   see the second of the two points below.
+6. **Do the resource-server half** in the table above: section 1 lists it.
+
+#### If you use something else, you
+
+- **An authorization server you already have:** check it against sections 1 and 2 and the two points below, and use it.
+  Then do the resource-server half.
+- **One you build:** you take on the authorization endpoint with PKCE `S256`; the token endpoint with refresh tokens and
   the `resource` parameter; client registration (dynamic, or by hand); a consent step; the metadata document; and
-  publishing and rotating the signing keys. You also connect it to your existing sign-in, and follow the revisions of the
-  MCP authorization specification. This is security-sensitive code that is reviewed and patched for as long as the
-  product lives.
-- **You run a ready-made one**, for example an open-source server such as Keycloak. It does the authorization-server work
-  above. What stays with you is operating it (its database, its upgrades, a backup of its signing keys); connecting your
-  existing sign-in to it (through OpenID Connect, or through a small bridge if your sign-in is not OpenID Connect);
-  configuring it so the tokens it issues name your server as the audience; and the resource-server half.
+  publishing and rotating the signing keys. You also connect it to your existing sign-in and follow the revisions of the
+  MCP authorization specification. Then do the resource-server half.
 
 The same authorization server may serve the callers' sign-in (`authorization_servers` in mcp-fuse's configuration) and a
 backend; mcp-fuse still obtains a separate token for each backend ([authorization](authorization.md)). What sharing buys
