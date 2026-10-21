@@ -1,13 +1,9 @@
 #!/usr/bin/env bash
 # Build mcp-fuse.
 #
-# Releases are CI's: every push to main runs this script inside deploy/release/Dockerfile with
-# MCP_FUSE_VERSION=<commit sha> and publishes ghcr.io/daquv-core/mcp-fuse:<sha>. Publishing is not
-# deploying: control-plane deploys a sha when it pins it (docs/cp_share/contract.md).
+#   ./build.sh   -> ./mcp-fuse
 #
-#   ./build.sh   -> ./mcp-fuse (a local build)
-#
-# The version is MCP_FUSE_VERSION when set (CI, whose build context has no .git), otherwise
+# The version is MCP_FUSE_VERSION when set (a build without .git, such as the Docker build), otherwise
 # git describe --tags --always --dirty.
 set -euo pipefail
 cd "$(dirname "$0")"
