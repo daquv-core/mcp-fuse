@@ -10,9 +10,9 @@
   "state_file": "/var/lib/mcp-fuse/state.bin",
   "secret_file": "/etc/mcp-fuse/secret",
   "backends": [
-    {"name": "quvi", "url": "https://quvi.internal/v3/mcp/nl2sql"},
-    {"name": "exec", "url": "https://exec-mcp.internal/mcp",
-     "client_id": "mcp-fuse", "client_secret_file": "/etc/mcp-fuse/exec-client-secret"}
+    {"name": "orders", "url": "https://orders.example.com/mcp"},
+    {"name": "analytics", "url": "https://analytics.example.com/mcp",
+     "client_id": "mcp-fuse", "client_secret_file": "/etc/mcp-fuse/analytics-client-secret"}
   ],
   "list_timeout_seconds": 15
 }
