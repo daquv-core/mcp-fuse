@@ -52,7 +52,8 @@ one state file, one instance. `./build.sh` builds it; `go test -race ./...` test
 ## Documentation model
 - `README.md` - what it is, what it does not do, how to start. English is the source; `README.ko.md` and
   `README.ja.md` are translations that follow it. Change all three together.
-- `docs/` - configuration, authorization, deployment, security, protocol. English. Each fact lives in one place and
+- `docs/` - backends (for people who build a server to put behind mcp-fuse), configuration, authorization,
+  deployment, security, protocol. English. Each fact lives in one place and
   the other documents link to it.
 - Documents state what is true whatever the release: no "first implementation", "not released", "not yet" or
   "pending" notes. What is unsupported is listed as unsupported; what is open belongs in an issue.

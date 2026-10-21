@@ -33,6 +33,18 @@ A backend is connected once per person.
 
 The whole flow must be finished in the browser that opened the link. See [authorization](docs/authorization.md).
 
+## Adding your MCP server
+
+Your server does not change for mcp-fuse. Build it to the [MCP specification](https://modelcontextprotocol.io/specification/latest):
+Streamable HTTP, and the [authorization specification](https://modelcontextprotocol.io/specification/latest/basic/authorization)
+(protected resource metadata, an authorization server with PKCE, tokens whose audience is your server). Then:
+
+1. let mcp-fuse be known to your authorization server as an OAuth client (or enable dynamic client registration);
+2. add `{"name": "orders", "url": "https://orders.example.com/mcp"}` to `backends` and restart.
+
+Each person connects it once, from a link; after that its tools appear in their list, merged with the others'.
+[Adding your MCP server](docs/backends.md) says exactly what is required and how to check your server first.
+
 ## What it does not do
 
 These are out of scope and will stay that way. Requests for them belong in the backends.
@@ -72,6 +84,7 @@ the authorization servers ([authorization](docs/authorization.md)). Run **one in
 
 ## Documentation
 
+- [Adding your MCP server](docs/backends.md) — what to build, what to register, what to add.
 - [Configuration](docs/configuration.md) — every key.
 - [Authorization](docs/authorization.md) — what to register where, and how a backend is connected.
 - [Deployment](docs/deployment.md) — build, files, reverse proxy, operating it.
