@@ -32,6 +32,9 @@ one state file, one instance. Built and published by CI on every push to main; d
   the audience. The caller's token never reaches a backend.
 - Nothing a caller sent, a backend answered, or any token is logged: tool name, backend, latency, status only.
 - Grants are encrypted at rest; a connect state is used once; a connect link is a signed, short-lived ticket.
+- A ticket says whom a link was made for and proves nothing about who opens it. A connect stores a grant only after
+  the person who signs in at the callers' authorization server is the person the ticket names, and only in the
+  browser that opened the link (cookie). A link or a backend sign-in address handed to someone else connects nothing.
 - One backend failing leaves the others' tools in place. A person sees only what they have connected.
 
 ## Documentation model

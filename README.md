@@ -35,11 +35,16 @@ agent presented is never sent to a backend, so a backend needs nothing beyond a 
 A backend is connected once per person.
 
 1. The agent calls `initialize`. For every backend the person has not connected, the instructions carry a link.
-2. The person opens the link in a browser. It leads to the backend's own authorization server (found through the
-   backend's protected resource metadata, RFC 9728; authorization code with PKCE, bound to the backend by the
-   resource indicator, RFC 8707).
-3. After signing in there, the person is sent back to `mcp-fuse`, which keeps the tokens, encrypted, for that person
+2. The person opens the link in a browser. They first sign in at the authorization server that callers of
+   `mcp-fuse` log in at. That proves who is connecting, and it must be the person the link was made for: a link
+   that was passed to someone else connects nothing.
+3. They are then sent to the backend's own authorization server (found through the backend's protected resource
+   metadata, RFC 9728; authorization code with PKCE, bound to the backend by the resource indicator, RFC 8707).
+4. After signing in there, the person is sent back to `mcp-fuse`, which keeps the tokens, encrypted, for that person
    and that backend. The agent starts the conversation again and the backend's tools are there.
+
+The whole flow has to be finished in the browser that opened the link (a cookie ties the steps together), so the
+backend's sign-in address is of no use to anyone else.
 
 If the authorization server stops honouring the refresh token, the backend drops out of the person's list and the
 link appears in the instructions again.
@@ -94,7 +99,7 @@ One JSON file; a change takes effect on restart. Unknown keys are an error.
 | `listen` | Address to bind. Default `127.0.0.1:8080`. |
 | `resource` | The public URL agents connect to; MCP is served on its path. It is the audience a caller's token must have. |
 | `authorization_servers` | Where an agent logs in. Which one is a deployment decision; mcp-fuse only advertises it. |
-| `auth.introspection_url`, `auth.client_id`, `auth.client_secret_file` | How a caller's token is checked (RFC 7662): it must be active, name a subject, and have `resource` as an audience. Omit `auth` only if every backend is `"auth": "none"`. |
+| `auth.introspection_url`, `auth.client_id`, `auth.client_secret_file` | How a caller's token is checked (RFC 7662): it must be active, name a subject, and have `resource` as an audience. The same client signs a person in when a backend is connected (authorization code with PKCE); register `<resource origin><resource path>/connect/identify` as its redirect URI. Omit `auth` only if every backend is `"auth": "none"`. |
 | `state_file` | Where grants are kept, encrypted. Losing it means every person connects again. |
 | `secret_file` | At least 32 bytes. The key for `state_file` and for the connect links is derived from it. |
 | `backends[].name` | Unique; shown in logs, in the instructions and in the connect link. No `/`, `?`, `#` or spaces. |
@@ -112,6 +117,7 @@ for the example above `https://mcp.example.com/mcp/connect/callback`.
 |---|---|
 | `POST <resource path>` | MCP. `GET` and `DELETE` answer 405. |
 | `GET <resource path>/connect/<backend>?t=…` | Starts connecting a backend. The link is handed out in the instructions and is valid for 10 minutes. |
+| `GET <resource path>/connect/identify` | Where the sign-in at the callers' authorization server returns. |
 | `GET <resource path>/connect/callback` | Where the backend's authorization server sends the person back. |
 | `GET /.well-known/oauth-protected-resource[/<resource path>]` | Protected resource metadata ([RFC 9728](https://www.rfc-editor.org/rfc/rfc9728)): `resource` and `authorization_servers` from the configuration. |
 | `GET /healthz` | `{"status":"ok","version":"…"}`. It does not probe backends. |

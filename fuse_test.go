@@ -124,17 +124,24 @@ func TestEachBackendGetsItsOwnTokenAndNothingElse(t *testing.T) {
 	}
 }
 
-func TestConnectingChecksStatePKCEIssuerAndTicket(t *testing.T) {
-	b := newMCP(t, &fakeMCP{tools: []string{"T"}})
-	w := newWorld(t, nil, b, newMCP(t, &fakeMCP{tools: []string{"U"}}))
-
-	link := func(backend string) string {
-		_, data := w.post(aliceToken, initBody, nil)
-		return regexp.MustCompile(`http://\S+/connect/` + backend + `\?t=\S+`).FindString(instructionsOf(t, data))
+// stopAtBackend is a browser that follows redirects but stops at the authorization request to the backend's
+// server, so that a test can look at it, or hand it to someone else.
+func (w *world) stopAtBackend() *http.Client {
+	c := newBrowser()
+	c.CheckRedirect = func(req *http.Request, _ []*http.Request) error {
+		if req.URL.Path == "/authorize" && req.URL.Query().Get("resource") != w.f.cfg.Resource {
+			return http.ErrUseLastResponse
+		}
+		return nil
 	}
+	return c
+}
+
+func TestConnectBeginsWithProofOfWhoIsConnecting(t *testing.T) {
+	w := newWorld(t, nil, newMCP(t, &fakeMCP{tools: []string{"T"}}), newMCP(t, &fakeMCP{tools: []string{"U"}}))
 	noRedirect := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	status := func(u string) int {
-		resp, err := noRedirect.Get(u)
+	status := func(c *http.Client, u string) int {
+		resp, err := c.Get(u)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -142,41 +149,156 @@ func TestConnectingChecksStatePKCEIssuerAndTicket(t *testing.T) {
 		return resp.StatusCode
 	}
 
-	good := link("b0")
-	if status(strings.Replace(good, "?t=", "?t=x", 1)) != 400 {
+	good := w.linkFor(aliceToken, "b0")
+	if status(noRedirect, strings.Replace(good, "?t=", "?t=x", 1)) != 400 {
 		t.Error("a tampered ticket was accepted")
 	}
-	other := link("b1")
-	if status(strings.Replace(other, "/connect/b1", "/connect/b0", 1)) != 400 {
+	if status(noRedirect, strings.Replace(w.linkFor(aliceToken, "b1"), "/connect/b1", "/connect/b0", 1)) != 400 {
 		t.Error("a ticket for b1 opened b0")
 	}
-	if status(w.srv.URL+"/mcp/connect/b0") != 400 {
+	if status(noRedirect, w.srv.URL+"/mcp/connect/b0") != 400 {
 		t.Error("no ticket was accepted")
 	}
-
-	cb := w.srv.URL + "/mcp/connect/callback"
-	if status(cb+"?code=c&state=forged") != 400 {
+	identify := w.srv.URL + "/mcp/connect/identify"
+	if status(noRedirect, identify+"?code=c&state=forged") != 400 {
 		t.Error("a forged state was accepted")
 	}
-	redir, err := noRedirect.Get(good)
+
+	// The first stop is the sign-in at the callers' authorization server, not the backend's.
+	browser := &http.Client{Jar: newBrowser().Jar, CheckRedirect: noRedirect.CheckRedirect}
+	redir, err := browser.Get(good)
 	if err != nil || redir.StatusCode != 302 {
 		t.Fatalf("start: %v %v", redir, err)
 	}
 	authURL, _ := url.Parse(redir.Header.Get("Location"))
 	q := authURL.Query()
-	if q.Get("code_challenge_method") != "S256" || q.Get("resource") != b.url() || q.Get("redirect_uri") != cb {
-		t.Errorf("authorization request: %v", q)
+	if !strings.HasPrefix(redir.Header.Get("Location"), w.as.srv.URL+"/authorize") || q.Get("client_id") != "fuse" ||
+		q.Get("resource") != w.f.cfg.Resource || q.Get("redirect_uri") != identify || q.Get("code_challenge_method") != "S256" {
+		t.Errorf("sign-in request: %v", redir.Header.Get("Location"))
+	}
+	var cookie *http.Cookie
+	for _, c := range redir.Cookies() {
+		if c.Name == cookieName {
+			cookie = c
+		}
+	}
+	if cookie == nil || !cookie.HttpOnly || cookie.SameSite != http.SameSiteLaxMode || cookie.Path != "/mcp/connect" {
+		t.Errorf("the flow must be pinned to the browser with a cookie, got %+v", cookie)
 	}
 	state := q.Get("state")
-	if status(cb+"?code=c&state="+state+"&iss=https://evil.example") != 400 {
-		t.Error("a response from the wrong issuer was accepted")
+
+	// From here on every request carries the cookie, so a refusal can only be for the reason being tested.
+	// The sign-in state is not a backend state: it cannot be used to skip the proof of who is connecting.
+	if status(browser, w.srv.URL+"/mcp/connect/callback?code=x&state="+state+"&iss="+url.QueryEscape(w.as.srv.URL)) != 400 {
+		t.Error("the sign-in state was accepted at the backend step")
 	}
-	// A replay with everything else right (the issuer included) is refused only because the state was used.
-	if status(cb+"?code=c&state="+state+"&iss="+url.QueryEscape(w.as.srv.URL)) != 400 {
+	// Each of these consumes a state, so each starts a fresh flow in the same browser.
+	fresh := func() string {
+		r, err := browser.Get(w.linkFor(aliceToken, "b0"))
+		if err != nil || r.StatusCode != 302 {
+			t.Fatalf("start: %v %v", r, err)
+		}
+		r.Body.Close()
+		u, _ := url.Parse(r.Header.Get("Location"))
+		return u.Query().Get("state")
+	}
+	if status(browser, identify+"?code=x&state="+fresh()+"&iss=https://evil.example") != 400 {
+		t.Error("a sign-in response from the wrong issuer was accepted")
+	}
+	st := fresh()
+	if status(browser, identify+"?code=x&state="+st+"&iss="+url.QueryEscape(w.as.srv.URL)) == 400 {
+		t.Error("a well-formed sign-in response was refused for the wrong reason")
+	}
+	if status(browser, identify+"?code=x&state="+st+"&iss="+url.QueryEscape(w.as.srv.URL)) != 400 {
 		t.Error("a state was usable twice")
+	}
+	// Without the cookie of the browser that began the flow, nothing is accepted, whatever else is right.
+	if status(noRedirect, identify+"?code=x&state="+fresh()+"&iss="+url.QueryEscape(w.as.srv.URL)) != 400 {
+		t.Error("a sign-in response from another browser was accepted")
 	}
 	if w.f.connected(mustPerson(t, w, "alice"), 0) {
 		t.Error("nothing should have been connected by any of that")
+	}
+}
+
+// The ticket says whom a link was made for; it proves nothing about who opens it. A link forwarded to someone else
+// must not store that person's token under the first person's name.
+func TestALinkOpenedByAnotherPersonConnectsNothing(t *testing.T) {
+	exec := newMCP(t, &fakeMCP{tools: []string{"T"}})
+	w := newWorld(t, nil, exec)
+	link := w.linkFor(aliceToken, "b0") // made for alice
+
+	w.as.setLogin("bob") // ... but bob is the one signed in at the browser that opens it
+	resp, err := newBrowser().Get(link)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Errorf("status %d, want 403", resp.StatusCode)
+	}
+	for _, who := range []string{"alice", "bob"} {
+		if w.f.connected(mustPerson(t, w, who), 0) {
+			t.Errorf("%s ended up with a connection", who)
+		}
+	}
+	if len(exec.allRequests()) != 0 {
+		t.Error("the backend was contacted for a link its holder was not entitled to")
+	}
+	if !strings.Contains(w.logs.String(), "not the one the link was made for") {
+		t.Error("the refusal should be logged")
+	}
+}
+
+// Proving who is connecting at the start is not enough: the backend's sign-in URL can be handed to someone else.
+// The flow has to be finished in the browser it began in.
+func TestAFlowIsFinishedOnlyInTheBrowserItBegan(t *testing.T) {
+	exec := newMCP(t, &fakeMCP{tools: []string{"T"}})
+	w := newWorld(t, nil, exec)
+	link := w.linkFor(aliceToken, "b0")
+
+	// alice (really alice) opens the link and gets as far as the backend's sign-in, then passes that URL on.
+	w.as.setLogin("alice")
+	resp, err := w.stopAtBackend().Get(link)
+	if err != nil || resp.StatusCode != http.StatusFound {
+		t.Fatalf("expected to stop at the backend sign-in: %v %v", resp, err)
+	}
+	backendSignIn := resp.Header.Get("Location")
+	resp.Body.Close()
+
+	// bob opens it in his own browser, signs in as bob, and is sent back to mcp-fuse.
+	w.as.setLogin("bob")
+	resp, err = newBrowser().Get(backendSignIn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("finishing in another browser -> %d, want 400", resp.StatusCode)
+	}
+	for _, who := range []string{"alice", "bob"} {
+		if w.f.connected(mustPerson(t, w, who), 0) {
+			t.Errorf("%s ended up with a connection", who)
+		}
+	}
+	if !strings.Contains(w.logs.String(), "different browser") {
+		t.Error("the refusal should be logged")
+	}
+}
+
+func TestBackendStepAsksForWhatItShould(t *testing.T) {
+	b := newMCP(t, &fakeMCP{tools: []string{"T"}})
+	w := newWorld(t, nil, b)
+	w.as.setLogin("alice")
+	resp, err := w.stopAtBackend().Get(w.linkFor(aliceToken, "b0"))
+	if err != nil || resp.StatusCode != http.StatusFound {
+		t.Fatalf("%v %v", resp, err)
+	}
+	resp.Body.Close()
+	q, _ := url.Parse(resp.Header.Get("Location"))
+	if q.Query().Get("code_challenge_method") != "S256" || q.Query().Get("resource") != b.url() ||
+		q.Query().Get("redirect_uri") != w.srv.URL+"/mcp/connect/callback" {
+		t.Errorf("backend authorization request: %v", resp.Header.Get("Location"))
 	}
 }
 
@@ -650,7 +772,7 @@ func TestConfidentialClientWithAWrongSecretCannotConnect(t *testing.T) {
 	}, newMCP(t, &fakeMCP{tools: []string{"T"}}))
 	_, data := w.post(aliceToken, initBody, nil)
 	link := regexp.MustCompile(`http://\S+/connect/b0\?t=\S+`).FindString(instructionsOf(t, data))
-	resp, err := http.Get(link)
+	resp, err := newBrowser().Get(link)
 	if err != nil {
 		t.Fatal(err)
 	}
