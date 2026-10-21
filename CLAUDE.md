@@ -4,8 +4,8 @@ A reverse proxy that presents several MCP servers as one. It does nothing else.
 
 ## Boundary
 - Toward the agent it is an ordinary MCP **resource server**: the token a caller presents is for mcp-fuse
-  (`resource` is its audience), is checked (`front.go`), and is used for nothing else.
-- Toward each backend it is an ordinary MCP **client** (`oauth.go`, `backend.go`): it holds, per person and per
+  (`resource` is its audience), is checked (`internal/front`), and is used for nothing else.
+- Toward each backend it is an ordinary MCP **client** (`internal/oauthc`, `internal/fuse/backend.go`): it holds, per person and per
   backend, a token issued by *that backend's own authorization server*, and its own MCP session.
 - It merges `initialize`, the lists (`tools`, `prompts`, `resources`) and routes the follow-up request
   (`tools/call`, `prompts/get`, `resources/read`) to the backend that listed the thing. Everything else is passed
@@ -14,8 +14,21 @@ A reverse proxy that presents several MCP servers as one. It does nothing else.
   request beyond what an MCP client sends, or ask anything of a backend beyond a standard MCP server.
 - **Out of scope, permanently:** policy, masking, result transformation, caching, retries, LLM. A request for any
   of these belongs in a backend. Say so and stop.
-- The only durable state is the encrypted grants file (`grants.go`). Everything else is memory that can be lost:
-  the routing index, the backend sessions, the pending connects.
+- The only durable state is the encrypted grants file (`internal/state`). Everything else is memory that can be lost:
+  the routing index (`internal/fuse/routes.go`), the backend sessions, the pending connects.
+
+## Layout
+```
+cmd/mcp-fuse/      main: flags, wiring, graceful shutdown
+internal/config/   the JSON file and its checks
+internal/jsonrpc/  the JSON-RPC frame, reading event streams, writing replies
+internal/front/    checking the token a caller presents (introspection)
+internal/oauthc/   OAuth client of the backends: discovery, registration, tokens, refresh, PKCE
+internal/state/    the encrypted grants file; signed connect tickets
+internal/neterr/   naming transport errors without their text
+internal/fuse/     the handler: merging, routing, backend sessions, the connect pages
+```
+Dependencies point one way: `fuse` uses the others; the others do not use `fuse`. Keep it that way.
 
 ## Form
 Go, standard library only (no dependencies - keep `go.mod` free of `require`). One static binary, one JSON file,
