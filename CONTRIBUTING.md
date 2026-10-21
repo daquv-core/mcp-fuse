@@ -35,6 +35,8 @@ way, from `internal/fuse` to the other packages.
 - **Documentation** in step with the code. `README.md` is the source for `README.ko.md` and `README.ja.md`; change
   all three together. The documents under `docs/` are in English and state what is true whatever the release — no
   "not yet" or "coming soon".
+- **English text.** Commit messages, pull request titles and descriptions, and issues are in English. (The Korean and
+  Japanese READMEs are translations of the English one, nothing more.)
 - **A small diff.** Keep a change to one thing.
 
 ## Security
