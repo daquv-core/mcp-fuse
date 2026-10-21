@@ -1,0 +1,93 @@
+name: release
+
+# A `v*` tag makes a draft GitHub Release carrying the binary of the tagged commit and its checksum. The binary is
+# copied out of ghcr.io/daquv-core/mcp-fuse:<commit sha>, which publish.yml made when that commit reached main - it
+# is not rebuilt, so what a release carries is byte for byte what was published and run from that commit. A tag on a
+# commit that was never published fails here; tag after the commit's publish run has succeeded.
+#
+# The release stays a draft: a person reviews it and publishes it.
+
+on:
+  push:
+    tags: ['v*']
+
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  draft:
+    runs-on: [self-hosted, mcp-fuse]
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      packages: read
+    env:
+      IMG: ghcr.io/daquv-core/mcp-fuse
+      TAG: ${{ github.ref_name }}
+    steps:
+      - name: Isolate docker config per job
+        run: |
+          echo "DOCKER_CONFIG=${RUNNER_TEMP}/.docker" >> "$GITHUB_ENV"
+          mkdir -p "${RUNNER_TEMP}/.docker"
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Take the binary from the commit's image
+        run: |
+          set -euo pipefail
+          if ! docker pull -q "$IMG:${GITHUB_SHA}" >/dev/null; then
+            echo "::error::$IMG:${GITHUB_SHA} is not published - tag a commit whose publish run succeeded"
+            exit 1
+          fi
+          out="${RUNNER_TEMP}/dist"
+          rm -rf "$out" && mkdir -p "$out"
+          cid="$(docker create "$IMG:${GITHUB_SHA}" /mcp-fuse)"
+          docker cp "$cid:/mcp-fuse" "$out/mcp-fuse-linux-amd64"
+          docker rm "$cid" >/dev/null
+          docker image rm "$IMG:${GITHUB_SHA}" >/dev/null
+          got="$("$out/mcp-fuse-linux-amd64" -version)"
+          if [ "$got" != "${GITHUB_SHA}" ]; then
+            echo "::error::the binary reports '$got', expected ${GITHUB_SHA}"
+            exit 1
+          fi
+          (cd "$out" && sha256sum mcp-fuse-linux-amd64 > SHA256SUMS)
+          echo "DIST=$out" >> "$GITHUB_ENV"
+      - name: Create the draft release
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+            const tag = process.env.TAG;
+            const sha = context.sha;
+            const { data: rel } = await github.rest.repos.createRelease({
+              ...context.repo,
+              tag_name: tag,
+              name: tag,
+              draft: true,
+              body: [
+                `Commit \`${sha}\`. \`mcp-fuse -version\` prints the commit, not the tag.`,
+                '',
+                '`mcp-fuse-linux-amd64` is a static binary; check it with `sha256sum -c SHA256SUMS`.',
+                `It is the binary of \`ghcr.io/daquv-core/mcp-fuse:${sha}\`, not rebuilt.`,
+              ].join('\n'),
+            });
+            for (const name of ['mcp-fuse-linux-amd64', 'SHA256SUMS']) {
+              await github.rest.repos.uploadReleaseAsset({
+                ...context.repo,
+                release_id: rel.id,
+                name,
+                data: fs.readFileSync(path.join(process.env.DIST, name)),
+                headers: { 'content-type': 'application/octet-stream' },
+              });
+            }
+            core.notice(`draft ${tag}: ${rel.html_url}`);
+      - name: Clean up
+        if: always()
+        run: rm -rf "${RUNNER_TEMP}/dist"

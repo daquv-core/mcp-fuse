@@ -35,6 +35,11 @@ Dependencies point one way: `fuse` uses the others; the others do not use `fuse`
 Go, standard library only (no dependencies - keep `go.mod` free of `require`). One static binary, one JSON file,
 one state file, one instance. `./build.sh` builds it; `go test -race ./...` tests it.
 
+CI (`.github/workflows/`): `check` on every pull request; `publish` on every push to `main`, which pushes
+`ghcr.io/daquv-core/mcp-fuse:<sha>` (the Dockerfile's `release` stage: `FROM scratch`, one layer, the binary alone);
+`release` on a `v*` tag, which copies the binary out of that commit's image into a draft GitHub Release. A release
+never rebuilds - keep it that way, or a release stops being what was published and run. Nothing deploys on merge.
+
 ## Invariants the tests lock
 - A tool call's request and reply pass through byte for byte.
 - A backend is sent only: `Content-Type`, `Accept`, `User-Agent`, `MCP-Protocol-Version`, its own `Mcp-Session-Id`,
