@@ -19,7 +19,7 @@ that user may do. Section 1 lists what it takes.
 
 ### Where the authorization server comes from
 
-- **You already have one that follows the standard.** Check it against the list at the end of this section and use it.
+- **You already have one that follows the standard.** Check it against sections 1 and 2 and the two points below, and use it.
 - **You build one.** You take on the authorization endpoint with PKCE `S256`; the token endpoint with refresh tokens and
   the `resource` parameter; client registration (dynamic, or by hand); a consent step; the metadata document; and
   publishing and rotating the signing keys. You also connect it to your existing sign-in, and follow the revisions of the
@@ -35,16 +35,16 @@ backend; mcp-fuse still obtains a separate token for each backend ([authorizatio
 is that, if the server keeps a sign-in session for the browser, the person is not asked to sign in again when they
 connect the backend. What they are shown beyond that is up to the server's consent settings.
 
-### What to check in an authorization server before you rely on it
+### Two things a ready-made server does not make obvious
 
-1. Its metadata advertises PKCE `S256`, and its `issuer` is exactly the value your protected resource metadata lists.
-2. It issues tokens whose audience is your server's URL. mcp-fuse sends the `resource` parameter; if the server does not
-   act on it, the audience has to come from configuration. **Decode a token it issues and read `aud`** - the default may
-   be something else.
-3. It issues refresh tokens.
-4. mcp-fuse can be a client of it: dynamic registration is on, or you register a client by hand (section 2).
-5. The claim your server needs to identify the person (an email address, a subject) is in the **access token**, not only
-   in the ID token, and is the verified value.
+What the authorization server must publish and accept is in section 1 (metadata, PKCE `S256`, the `resource` parameter,
+refresh tokens) and section 2 (registering mcp-fuse as a client). Beyond that:
+
+1. **The audience a ready-made server puts in a token is not necessarily your server.** Its default may name some other
+   client or service. Decode a token it issues and read `aud`; if the server does not act on `resource`, the audience has
+   to come from its configuration.
+2. **The claim your server uses to identify the person has to be in the access token**, not only in the ID token, and has
+   to be the verified value (for an email address, the one the server marks as verified).
 
 ## 1. Build it to the standard
 
