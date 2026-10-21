@@ -20,7 +20,7 @@ permissions:
 
 jobs:
   draft:
-    runs-on: [self-hosted, slot]
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
       contents: write
@@ -29,10 +29,6 @@ jobs:
       IMG: ghcr.io/daquv-core/mcp-fuse
       TAG: ${{ github.ref_name }}
     steps:
-      - name: Isolate docker config per job
-        run: |
-          echo "DOCKER_CONFIG=${RUNNER_TEMP}/.docker" >> "$GITHUB_ENV"
-          mkdir -p "${RUNNER_TEMP}/.docker"
       - uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -50,7 +46,6 @@ jobs:
           cid="$(docker create "$IMG:${GITHUB_SHA}" /mcp-fuse)"
           docker cp "$cid:/mcp-fuse" "$out/mcp-fuse-linux-amd64"
           docker rm "$cid" >/dev/null
-          docker image rm "$IMG:${GITHUB_SHA}" >/dev/null
           got="$("$out/mcp-fuse-linux-amd64" -version)"
           if [ "$got" != "${GITHUB_SHA}" ]; then
             echo "::error::the binary reports '$got', expected ${GITHUB_SHA}"
@@ -88,6 +83,3 @@ jobs:
               });
             }
             core.notice(`draft ${tag}: ${rel.html_url}`);
-      - name: Clean up
-        if: always()
-        run: rm -rf "${RUNNER_TEMP}/dist"

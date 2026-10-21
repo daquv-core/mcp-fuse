@@ -1,7 +1,7 @@
 name: check
 
-# Every pull request: gofmt, vet, a static build and the tests under the race detector, in the same Go image the
-# release is built with. Pull requests from forks are not run on the self-hosted runners.
+# Every pull request: gofmt, vet, a static build and the tests under the race detector, with the Go release the
+# Dockerfile builds with.
 
 on:
   pull_request:
@@ -15,16 +15,16 @@ permissions:
 
 jobs:
   check:
-    if: github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: [self-hosted, slot]
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-      - name: Build and test
-        run: |
-          docker run --rm -u "$(id -u):$(id -g)" -v "$PWD:/src" -w /src \
-            -e HOME=/tmp -e GOCACHE=/tmp/go-cache -e GOPATH=/tmp/go -e MCP_FUSE_VERSION="pr-${{ github.event.pull_request.head.sha }}" \
-            golang:1.26 sh -c './build.sh && go test -race ./...'
-      - name: Clean up
-        if: always()
-        run: rm -f mcp-fuse
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+      - name: Build
+        run: ./build.sh
+        env:
+          MCP_FUSE_VERSION: pr-${{ github.event.pull_request.head.sha }}
+      - name: Test
+        run: go test -race ./...
