@@ -1,4 +1,4 @@
-package main
+package fuse
 
 import (
 	"context"
@@ -10,6 +10,10 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/daquv-core/mcp-fuse/internal/config"
+	"github.com/daquv-core/mcp-fuse/internal/jsonrpc"
+	"github.com/daquv-core/mcp-fuse/internal/state"
 )
 
 const listBody = `{"jsonrpc":"2.0","id":2,"method":"tools/list"}`
@@ -35,7 +39,7 @@ func TestCallersMustPresentATokenIssuedForThisServer(t *testing.T) {
 	} {
 		resp, _ := w.post(tc.token, listBody, nil)
 		got := resp.Header.Get("WWW-Authenticate")
-		if resp.StatusCode != 401 || !strings.Contains(got, `resource_metadata="`+w.f.cfg.prmURL+`"`) {
+		if resp.StatusCode != 401 || !strings.Contains(got, `resource_metadata="`+w.f.cfg.PRMURL+`"`) {
 			t.Errorf("%s: %d, challenge %q", name, resp.StatusCode, got)
 		}
 		if strings.Contains(got, "invalid_token") != tc.wantInvalid {
@@ -512,7 +516,7 @@ func TestNewerRevisionIsRefusedSoClientsFallBack(t *testing.T) {
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("status %d: %s", resp.StatusCode, data)
 	}
-	var env envelope
+	var env jsonrpc.Envelope
 	if json.Unmarshal(data, &env) == nil && len(env.Error) > 0 {
 		t.Errorf("the refusal must not look like a modern JSON-RPC error, or the client will not fall back: %s", data)
 	}
@@ -694,14 +698,14 @@ func TestGrantsAreNotStoredInTheClear(t *testing.T) {
 	if strings.Contains(string(raw), tok) || strings.Contains(string(raw), "alice") || strings.Contains(string(raw), "refresh") {
 		t.Error("the state file holds readable content")
 	}
-	st, err := openStore(w.statePath, testSecret)
+	st, err := state.Open(w.statePath, testSecret)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := st.grant(mustPerson(t, w, "alice"), "b0"); !ok {
+	if _, ok := st.Get(mustPerson(t, w, "alice"), "b0"); !ok {
 		t.Error("the grant did not survive a restart")
 	}
-	if _, err := openStore(w.statePath, []byte("another secret that is long enough to pass")); err == nil {
+	if _, err := state.Open(w.statePath, []byte("another secret that is long enough to pass")); err == nil {
 		t.Error("the state opened with the wrong secret")
 	}
 }
@@ -709,7 +713,7 @@ func TestGrantsAreNotStoredInTheClear(t *testing.T) {
 // mustPerson computes the key mcp-fuse uses for a person as the authorization server vouches for them.
 func mustPerson(t *testing.T, w *world, sub string) string {
 	t.Helper()
-	p, err := w.f.auth.verify(context.Background(), map[string]string{"alice": aliceToken, "bob": bobToken}[sub])
+	p, err := w.f.auth.Verify(context.Background(), map[string]string{"alice": aliceToken, "bob": bobToken}[sub])
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -744,10 +748,10 @@ func TestRequestIDIsPassedOnOnlyWhenItIsPlainlyAnID(t *testing.T) {
 // secret authenticates the client at the token endpoint for the code and for every refresh.
 func TestPreRegisteredConfidentialClient(t *testing.T) {
 	exec := newMCP(t, &fakeMCP{tools: []string{"T"}, callReply: map[string]string{"T": `{"jsonrpc":"2.0","id":1,"result":{}}`}})
-	w := newWorldWith(t, nil, func(c *Config, d *deps, as *fakeAS) {
+	w := newWorldWith(t, nil, func(c *config.Config, d *Deps, as *fakeAS) {
 		c.Backends[0].ClientID = "pre-registered"
 		c.Backends[0].ClientSecretFile = "unused-in-tests"
-		d.clientSecrets["b0"] = "pre-secret"
+		d.ClientSecrets["b0"] = "pre-secret"
 		as.confidential["pre-registered"] = "pre-secret"
 		as.expiresIn = 10 // forces a refresh, which must authenticate too
 	}, exec)
@@ -764,10 +768,10 @@ func TestPreRegisteredConfidentialClient(t *testing.T) {
 }
 
 func TestConfidentialClientWithAWrongSecretCannotConnect(t *testing.T) {
-	w := newWorldWith(t, nil, func(c *Config, d *deps, as *fakeAS) {
+	w := newWorldWith(t, nil, func(c *config.Config, d *Deps, as *fakeAS) {
 		c.Backends[0].ClientID = "pre-registered"
 		c.Backends[0].ClientSecretFile = "unused-in-tests"
-		d.clientSecrets["b0"] = "the wrong secret"
+		d.ClientSecrets["b0"] = "the wrong secret"
 		as.confidential["pre-registered"] = "pre-secret"
 	}, newMCP(t, &fakeMCP{tools: []string{"T"}}))
 	_, data := w.post(aliceToken, initBody, nil)
@@ -784,10 +788,10 @@ func TestConfidentialClientWithAWrongSecretCannotConnect(t *testing.T) {
 
 func TestSecretInTheBodyWhenTheServerOnlyTakesThat(t *testing.T) {
 	exec := newMCP(t, &fakeMCP{tools: []string{"T"}})
-	w := newWorldWith(t, nil, func(c *Config, d *deps, as *fakeAS) {
+	w := newWorldWith(t, nil, func(c *config.Config, d *Deps, as *fakeAS) {
 		c.Backends[0].ClientID = "pre-registered"
 		c.Backends[0].ClientSecretFile = "unused-in-tests"
-		d.clientSecrets["b0"] = "pre-secret"
+		d.ClientSecrets["b0"] = "pre-secret"
 		as.confidential["pre-registered"] = "pre-secret"
 		as.authMethods = []string{"client_secret_post"}
 		as.secretInBody = true

@@ -1,4 +1,4 @@
-package main
+package fuse
 
 import (
 	"bytes"
@@ -13,6 +13,12 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/daquv-core/mcp-fuse/internal/config"
+	"github.com/daquv-core/mcp-fuse/internal/front"
+	"github.com/daquv-core/mcp-fuse/internal/jsonrpc"
+	"github.com/daquv-core/mcp-fuse/internal/oauthc"
+	"github.com/daquv-core/mcp-fuse/internal/state"
 )
 
 // latestSupported is the newest MCP revision this server speaks: the `initialize` handshake and the optional
@@ -28,38 +34,33 @@ func newerThanSupported(v string) bool {
 	return v > latestSupported
 }
 
-// deps are the parts of a Fuse that come from outside the configuration file.
-type deps struct {
-	store         *store // nil when no backend needs a token
-	secret        []byte
-	auth          verifier
-	clientSecrets map[string]string // backend name -> secret of its pre-registered confidential client
-	frontSecret   string            // secret of the client mcp-fuse is at the callers' authorization server
+// Deps are the parts of a Fuse that come from outside the configuration file.
+type Deps struct {
+	Store         *state.Store // nil when no backend needs a token
+	Secret        []byte       // signs connect links
+	Auth          front.Verifier
+	ClientSecrets map[string]string // backend name -> secret of its pre-registered confidential client
+	FrontSecret   string            // secret of the client mcp-fuse is at the callers' authorization server
 }
 
+// Fuse is the http.Handler that presents the configured backends as one MCP server.
 type Fuse struct {
-	cfg         Config
+	cfg         config.Config
 	client      *http.Client // MCP traffic to the backends; no overall timeout
-	aux         *http.Client // discovery, registration and token endpoints
 	log         *slog.Logger
 	version     string
 	routes      *routeCache
 	listTimeout time.Duration
 
-	auth          verifier
-	store         *store
-	secret        []byte
-	clientSecrets map[string]string
-	frontSecret   string
+	auth        front.Verifier
+	store       *state.Store
+	secret      []byte
+	frontSecret string
+	oc          *oauthc.Client
 
 	sessMu   sync.Mutex
 	sessions map[sessionKey]bsession
-
-	discMu sync.Mutex
-	disc   map[int]authInfo
-	front  authInfo // the callers' authorization server, read once and kept for a while
-	regMu  sync.Mutex
-	locks  sync.Map // key -> *sync.Mutex
+	locks    sync.Map // key -> *sync.Mutex
 
 	pendMu  sync.Mutex
 	pending map[string]pendingAuth
@@ -69,15 +70,16 @@ type Fuse struct {
 type call struct {
 	in     *http.Request
 	body   []byte
-	env    envelope
+	env    jsonrpc.Envelope
 	person string // who the caller is, as the authorization server vouches
 	reqID  string
 	start  time.Time
 }
 
-func newFuse(cfg Config, log *slog.Logger, version string, d deps) *Fuse {
+// New builds the handler. The configuration must have been validated.
+func New(cfg config.Config, log *slog.Logger, version string, d Deps) *Fuse {
 	dial := &net.Dialer{Timeout: 5 * time.Second, KeepAlive: 30 * time.Second}
-	return &Fuse{
+	f := &Fuse{
 		cfg: cfg,
 		client: &http.Client{Transport: &http.Transport{
 			// Backends are addressed explicitly; an environment proxy must not sit between them and us.
@@ -88,33 +90,43 @@ func newFuse(cfg Config, log *slog.Logger, version string, d deps) *Fuse {
 			IdleConnTimeout:     90 * time.Second,
 			// No response-header timeout and no overall timeout: a tool call may run as long as it needs to.
 		}},
-		aux: &http.Client{Timeout: 15 * time.Second, Transport: &http.Transport{
+		log:         log,
+		version:     version,
+		routes:      newRouteCache(60*time.Second, 1024),
+		listTimeout: time.Duration(cfg.ListTimeoutSeconds) * time.Second,
+		auth:        d.Auth,
+		store:       d.Store,
+		secret:      d.Secret,
+		frontSecret: d.FrontSecret,
+		sessions:    map[sessionKey]bsession{},
+		pending:     map[string]pendingAuth{},
+	}
+	f.oc = &oauthc.Client{
+		HTTP: &http.Client{Timeout: 15 * time.Second, Transport: &http.Transport{
 			Proxy: nil, DialContext: dial.DialContext, TLSHandshakeTimeout: 10 * time.Second,
 		}},
-		log:           log,
-		version:       version,
-		routes:        newRouteCache(60*time.Second, 1024),
-		listTimeout:   time.Duration(cfg.ListTimeoutSeconds) * time.Second,
-		auth:          d.auth,
-		store:         d.store,
-		secret:        d.secret,
-		clientSecrets: d.clientSecrets,
-		frontSecret:   d.frontSecret,
-		sessions:      map[sessionKey]bsession{},
-		disc:          map[int]authInfo{},
-		pending:       map[string]pendingAuth{},
+		Store: d.Store, Backends: cfg.Backends, Secrets: d.ClientSecrets, Version: version, Probe: latestSupported,
+		RedirectURI: cfg.Origin + cfg.ConnectBase + callbackPath,
+		OnRevoked:   func(person string, idx int) { f.dropSession(sessionKey{person, idx}) },
 	}
+	return f
+}
+
+// keyLock returns the one mutex for a key, so that work on the same person and backend is serialized.
+func (f *Fuse) keyLock(key string) *sync.Mutex {
+	mu, _ := f.locks.LoadOrStore(key, &sync.Mutex{})
+	return mu.(*sync.Mutex)
 }
 
 func (f *Fuse) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case r.URL.Path == "/healthz":
-		writeFrame(w, http.StatusOK, map[string]string{"status": "ok", "version": f.version})
-	case r.URL.Path == f.cfg.prmPath || r.URL.Path == "/.well-known/oauth-protected-resource":
+		jsonrpc.WriteFrame(w, http.StatusOK, map[string]string{"status": "ok", "version": f.version})
+	case r.URL.Path == f.cfg.PRMPath || r.URL.Path == "/.well-known/oauth-protected-resource":
 		f.serveMetadata(w, r)
-	case strings.HasPrefix(r.URL.Path, f.cfg.connectBase+"/"):
+	case strings.HasPrefix(r.URL.Path, f.cfg.ConnectBase+"/"):
 		f.serveConnect(w, r)
-	case r.URL.Path == f.cfg.mcpPath:
+	case r.URL.Path == f.cfg.MCPPath:
 		f.serveMCP(w, r)
 	default:
 		http.NotFound(w, r)
@@ -128,7 +140,7 @@ func (f *Fuse) serveMetadata(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	writeFrame(w, http.StatusOK, map[string]any{
+	jsonrpc.WriteFrame(w, http.StatusOK, map[string]any{
 		"resource":                 f.cfg.Resource,
 		"authorization_servers":    f.cfg.AuthorizationServers,
 		"bearer_methods_supported": []string{"header"},
@@ -150,30 +162,30 @@ func (f *Fuse) serveMCP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token := bearerToken(r)
-	person, err := f.auth.verify(r.Context(), token)
+	token := front.BearerToken(r)
+	person, err := f.auth.Verify(r.Context(), token)
 	switch {
-	case errors.Is(err, errUnauthenticated):
+	case errors.Is(err, front.ErrUnauthenticated):
 		f.writeUnauthenticated(w, nil, token != "")
 		return
 	case err != nil:
-		writeRPCError(w, http.StatusServiceUnavailable, nil, codeBackend, "authentication unavailable")
+		jsonrpc.WriteError(w, http.StatusServiceUnavailable, nil, jsonrpc.CodeBackend, "authentication unavailable")
 		return
 	}
 
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxBody))
 	if err != nil {
-		writeRPCError(w, http.StatusRequestEntityTooLarge, nil, codeInvalidRequest, "request too large")
+		jsonrpc.WriteError(w, http.StatusRequestEntityTooLarge, nil, jsonrpc.CodeInvalidRequest, "request too large")
 		return
 	}
 	trimmed := bytes.TrimSpace(body)
 	if len(trimmed) > 0 && trimmed[0] == '[' {
-		writeRPCError(w, http.StatusBadRequest, nil, codeInvalidRequest, "batch requests are not supported")
+		jsonrpc.WriteError(w, http.StatusBadRequest, nil, jsonrpc.CodeInvalidRequest, "batch requests are not supported")
 		return
 	}
-	var env envelope
+	var env jsonrpc.Envelope
 	if err := json.Unmarshal(trimmed, &env); err != nil {
-		writeRPCError(w, http.StatusBadRequest, nil, codeParse, "parse error")
+		jsonrpc.WriteError(w, http.StatusBadRequest, nil, jsonrpc.CodeParse, "parse error")
 		return
 	}
 
@@ -188,12 +200,12 @@ func (f *Fuse) serveMCP(w http.ResponseWriter, r *http.Request) {
 	case env.Method == "":
 		// A response to a request the server made. This server makes none.
 		w.WriteHeader(http.StatusAccepted)
-	case !env.isRequest():
+	case !env.IsRequest():
 		f.notify(w, c)
 	case env.Method == "initialize":
 		f.initialize(w, c)
 	case env.Method == "ping":
-		writeResult(w, env.ID, struct{}{})
+		jsonrpc.WriteResult(w, env.ID, struct{}{})
 	default:
 		if _, ok := kinds[env.Method]; ok {
 			f.list(w, c, env.Method)
@@ -205,7 +217,7 @@ func (f *Fuse) serveMCP(w http.ResponseWriter, r *http.Request) {
 		}
 		idx := f.primary(person)
 		if idx < 0 {
-			writeRPCError(w, http.StatusOK, env.ID, codeNotConnected, "no backend is connected for this user")
+			jsonrpc.WriteError(w, http.StatusOK, env.ID, jsonrpc.CodeNotConnected, "no backend is connected for this user")
 			return
 		}
 		f.forward(w, c, idx, "")
@@ -241,7 +253,7 @@ func (f *Fuse) notify(w http.ResponseWriter, c *call) {
 				defer wg.Done()
 				resp, err := f.do(ctx, c.person, i, c.body, false)
 				if err != nil {
-					if !errors.Is(err, errNoSession) && !errors.Is(err, errNotConnected) {
+					if !errors.Is(err, errNoSession) && !errors.Is(err, oauthc.ErrNotConnected) {
 						f.log.Warn("notification not delivered", "backend", f.cfg.Backends[i].Name, "method", c.env.Method,
 							"request_id", c.reqID, "error", err.Error())
 					}
@@ -271,7 +283,7 @@ func (f *Fuse) initialize(w http.ResponseWriter, c *call) {
 	defer cancel()
 
 	type outcome struct {
-		env          envelope
+		env          jsonrpc.Envelope
 		err          error
 		notConnected bool
 	}
@@ -290,7 +302,7 @@ func (f *Fuse) initialize(w http.ResponseWriter, c *call) {
 			})
 			if err != nil {
 				outs[i].err = err
-				outs[i].notConnected = errors.Is(err, errNotConnected)
+				outs[i].notConnected = errors.Is(err, oauthc.ErrNotConnected)
 				return
 			}
 			outs[i].env = o.env
@@ -336,7 +348,7 @@ func (f *Fuse) initialize(w http.ResponseWriter, c *call) {
 		}
 	}
 	if ok == 0 && failed > 0 {
-		writeRPCError(w, http.StatusBadGateway, c.env.ID, codeBackend, "no backend available")
+		jsonrpc.WriteError(w, http.StatusBadGateway, c.env.ID, jsonrpc.CodeBackend, "no backend available")
 		return
 	}
 	if version == "" {
@@ -354,7 +366,7 @@ func (f *Fuse) initialize(w http.ResponseWriter, c *call) {
 	if len(parts) > 0 {
 		result["instructions"] = strings.Join(parts, "\n\n")
 	}
-	writeResult(w, c.env.ID, result)
+	jsonrpc.WriteResult(w, c.env.ID, result)
 	f.log.Info("call", "method", "initialize", "backend", "*", "status", http.StatusOK,
 		"ms", time.Since(c.start).Milliseconds(), "request_id", c.reqID)
 }

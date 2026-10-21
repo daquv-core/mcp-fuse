@@ -1,4 +1,4 @@
-package main
+package fuse
 
 import (
 	"context"
@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"sync"
 	"time"
+
+	"github.com/daquv-core/mcp-fuse/internal/jsonrpc"
 )
 
 func errText(err error) string {
@@ -161,10 +163,10 @@ func (f *Fuse) list(w http.ResponseWriter, c *call, method string) {
 	defer cancel()
 	l := f.collect(ctx, c, method)
 	if l.ok == 0 && l.failed > 0 {
-		writeRPCError(w, http.StatusBadGateway, c.env.ID, codeBackend, "no backend available")
+		jsonrpc.WriteError(w, http.StatusBadGateway, c.env.ID, jsonrpc.CodeBackend, "no backend available")
 		return
 	}
-	writeResult(w, c.env.ID, map[string]any{kinds[method].key: l.items})
+	jsonrpc.WriteResult(w, c.env.ID, map[string]any{kinds[method].key: l.items})
 	f.log.Info("call", "method", method, "backend", "*", "status", http.StatusOK,
 		"ms", time.Since(c.start).Milliseconds(), "request_id", c.reqID)
 }
@@ -173,9 +175,9 @@ func (f *Fuse) list(w http.ResponseWriter, c *call, method string) {
 // thing it names, and relays the answer untouched.
 func (f *Fuse) route(w http.ResponseWriter, c *call, listMethod string) {
 	k := kinds[listMethod]
-	name := paramString(c.env.Params, k.param)
+	name := jsonrpc.ParamString(c.env.Params, k.param)
 	if name == "" {
-		writeRPCError(w, http.StatusOK, c.env.ID, codeInvalidParams, "missing "+k.param)
+		jsonrpc.WriteError(w, http.StatusOK, c.env.ID, jsonrpc.CodeInvalidParams, "missing "+k.param)
 		return
 	}
 	idx, ok := f.routes.get(routeKey{person: c.person, kind: listMethod}, name)
@@ -184,13 +186,13 @@ func (f *Fuse) route(w http.ResponseWriter, c *call, listMethod string) {
 		l := f.collect(ctx, c, listMethod)
 		cancel()
 		if l.ok == 0 && l.failed > 0 {
-			writeRPCError(w, http.StatusBadGateway, c.env.ID, codeBackend, "no backend available")
+			jsonrpc.WriteError(w, http.StatusBadGateway, c.env.ID, jsonrpc.CodeBackend, "no backend available")
 			return
 		}
 		idx, ok = l.owner[name]
 	}
 	if !ok {
-		writeRPCError(w, http.StatusOK, c.env.ID, codeInvalidParams, "unknown "+k.noun+": "+name)
+		jsonrpc.WriteError(w, http.StatusOK, c.env.ID, jsonrpc.CodeInvalidParams, "unknown "+k.noun+": "+name)
 		return
 	}
 	f.forward(w, c, idx, name)

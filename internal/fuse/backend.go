@@ -1,4 +1,4 @@
-package main
+package fuse
 
 import (
 	"bytes"
@@ -10,6 +10,10 @@ import (
 	"mime"
 	"net/http"
 	"strconv"
+
+	"github.com/daquv-core/mcp-fuse/internal/jsonrpc"
+	"github.com/daquv-core/mcp-fuse/internal/neterr"
+	"github.com/daquv-core/mcp-fuse/internal/oauthc"
 )
 
 // A backend sees mcp-fuse as one MCP client. Each person has, per backend, their own token (oauth.go) and their
@@ -19,12 +23,14 @@ import (
 
 const (
 	maxBody       = 16 << 20 // largest request body read
-	maxReply      = 32 << 20 // largest backend reply read in full (lists, initialize)
 	sessionHeader = "Mcp-Session-Id"
 )
 
 // reqIDKey carries the request id through the contexts of the calls made for one inbound request.
 type reqIDKey struct{}
+
+// errUnauthorized: a backend refused the token it was sent.
+var errUnauthorized = errors.New("unauthorized")
 
 type sessionKey struct {
 	person string
@@ -88,7 +94,7 @@ func (f *Fuse) newRequest(ctx context.Context, idx int, body []byte, token strin
 
 type opened struct {
 	sess bsession
-	env  envelope // the backend's answer to initialize
+	env  jsonrpc.Envelope // the backend's answer to initialize
 }
 
 // open runs the MCP handshake with a backend as the person and remembers the session. It is called when a caller
@@ -108,7 +114,7 @@ func (f *Fuse) open(ctx context.Context, person string, idx int, token string) (
 	}
 	resp, err := f.client.Do(req)
 	if err != nil {
-		return opened{}, errors.New(errKind(err))
+		return opened{}, errors.New(neterr.Kind(err))
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusUnauthorized {
@@ -122,7 +128,7 @@ func (f *Fuse) open(ctx context.Context, person string, idx int, token string) (
 		return opened{}, err
 	}
 	if len(env.Error) > 0 {
-		var e rpcError
+		var e jsonrpc.Error
 		_ = json.Unmarshal(env.Error, &e)
 		return opened{}, fmt.Errorf("initialize: rpc error %d", e.Code)
 	}
@@ -171,8 +177,8 @@ func withToken[T any](f *Fuse, ctx context.Context, person string, idx int, fn f
 	var zero T
 	bk := f.cfg.Backends[idx]
 	token := ""
-	if bk.oauth() {
-		t, err := f.accessToken(ctx, person, idx)
+	if bk.OAuth() {
+		t, err := f.oc.AccessToken(ctx, person, idx)
 		if err != nil {
 			return zero, err
 		}
@@ -183,20 +189,20 @@ func withToken[T any](f *Fuse, ctx context.Context, person string, idx int, fn f
 		if !errors.Is(err, errUnauthorized) {
 			return v, err
 		}
-		if !bk.oauth() {
+		if !bk.OAuth() {
 			return zero, errors.New("backend refused a request that carried no token")
 		}
 		if attempt == 0 {
-			t, rerr := f.refresh(ctx, person, idx, token)
+			t, rerr := f.oc.Refresh(ctx, person, idx, token)
 			if rerr != nil {
 				return zero, rerr
 			}
 			token = t
 			continue
 		}
-		_ = f.store.deleteGrant(person, bk.Name)
+		_ = f.store.Delete(person, bk.Name)
 		f.dropSession(sessionKey{person, idx})
-		return zero, errNotConnected
+		return zero, oauthc.ErrNotConnected
 	}
 }
 
@@ -223,7 +229,7 @@ func (f *Fuse) do(ctx context.Context, person string, idx int, body []byte, crea
 			}
 			resp, err := f.client.Do(req)
 			if err != nil {
-				return nil, errors.New(errKind(err))
+				return nil, errors.New(neterr.Kind(err))
 			}
 			switch {
 			case resp.StatusCode == http.StatusUnauthorized:
@@ -248,28 +254,28 @@ var errNoSession = errors.New("no session")
 // has connected it.
 func (f *Fuse) connected(person string, idx int) bool {
 	bk := f.cfg.Backends[idx]
-	if !bk.oauth() {
+	if !bk.OAuth() {
 		return true
 	}
-	_, ok := f.store.grant(person, bk.Name)
+	_, ok := f.store.Get(person, bk.Name)
 	return ok
 }
 
 // readFrame reads the response frame carrying wantID from a reply, JSON or event stream.
-func readFrame(resp *http.Response, wantID json.RawMessage) (envelope, error) {
-	data, err := io.ReadAll(io.LimitReader(resp.Body, maxReply+1))
+func readFrame(resp *http.Response, wantID json.RawMessage) (jsonrpc.Envelope, error) {
+	data, err := io.ReadAll(io.LimitReader(resp.Body, jsonrpc.MaxFrame+1))
 	if err != nil {
-		return envelope{}, err
+		return jsonrpc.Envelope{}, err
 	}
-	if len(data) > maxReply {
-		return envelope{}, errors.New("reply too large")
+	if len(data) > jsonrpc.MaxFrame {
+		return jsonrpc.Envelope{}, errors.New("reply too large")
 	}
-	var env envelope
+	var env jsonrpc.Envelope
 	if mt, _, _ := mime.ParseMediaType(resp.Header.Get("Content-Type")); mt == "text/event-stream" {
-		return rpcFromSSE(bytes.NewReader(data), wantID)
+		return jsonrpc.FromSSE(bytes.NewReader(data), wantID)
 	}
 	if err := json.Unmarshal(data, &env); err != nil {
-		return envelope{}, err
+		return jsonrpc.Envelope{}, err
 	}
 	return env, nil
 }
