@@ -4,6 +4,48 @@ You have an MCP server — an application's actions, a data-query server, a tool
 behind a single endpoint together with others. **You do not change it for mcp-fuse.** Build it to the MCP standard,
 let mcp-fuse be known to its authorization server, and add it to mcp-fuse's configuration.
 
+## Who does what in authorization
+
+Authorization for an MCP server has two halves, and they are usually done by different software.
+
+| Half | What it does | Who provides it |
+|---|---|---|
+| **Authorization server** | Signs the person in, registers clients, runs the authorization code flow with PKCE, issues and refreshes tokens, publishes its metadata and signing keys. | You build it, or you run a ready-made one. |
+| **Resource server** (your MCP server) | Answers `401` with a pointer to its metadata, publishes its protected resource metadata, and checks every token it is given: signature, issuer, expiry, and that **it is the audience**. | Always your MCP server. |
+
+The second half never moves to the authorization server, whichever one you use. Only your server knows its own address
+as the audience, and only your application knows what the identity in a token means: which of your users it is, and what
+that user may do. Section 1 lists what it takes.
+
+### Where the authorization server comes from
+
+- **You already have one that follows the standard.** Check it against the list at the end of this section and use it.
+- **You build one.** You take on the authorization endpoint with PKCE `S256`; the token endpoint with refresh tokens and
+  the `resource` parameter; client registration (dynamic, or by hand); a consent step; the metadata document; and
+  publishing and rotating the signing keys. You also connect it to your existing sign-in, and follow the revisions of the
+  MCP authorization specification. This is security-sensitive code that is reviewed and patched for as long as the
+  product lives.
+- **You run a ready-made one**, for example an open-source server such as Keycloak. It does the authorization-server work
+  above. What stays with you is operating it (its database, its upgrades, a backup of its signing keys); connecting your
+  existing sign-in to it (through OpenID Connect, or through a small bridge if your sign-in is not OpenID Connect);
+  configuring it so the tokens it issues name your server as the audience; and the resource-server half.
+
+The same authorization server may serve the callers' sign-in (`authorization_servers` in mcp-fuse's configuration) and a
+backend; mcp-fuse still obtains a separate token for each backend ([authorization](authorization.md)). What sharing buys
+is that, if the server keeps a sign-in session for the browser, the person is not asked to sign in again when they
+connect the backend. What they are shown beyond that is up to the server's consent settings.
+
+### What to check in an authorization server before you rely on it
+
+1. Its metadata advertises PKCE `S256`, and its `issuer` is exactly the value your protected resource metadata lists.
+2. It issues tokens whose audience is your server's URL. mcp-fuse sends the `resource` parameter; if the server does not
+   act on it, the audience has to come from configuration. **Decode a token it issues and read `aud`** - the default may
+   be something else.
+3. It issues refresh tokens.
+4. mcp-fuse can be a client of it: dynamic registration is on, or you register a client by hand (section 2).
+5. The claim your server needs to identify the person (an email address, a subject) is in the **access token**, not only
+   in the ID token, and is the verified value.
+
 ## 1. Build it to the standard
 
 "The standard" is the [MCP specification](https://modelcontextprotocol.io/specification/latest). What mcp-fuse relies
