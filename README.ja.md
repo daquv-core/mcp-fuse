@@ -64,6 +64,8 @@ cp examples/config.json config.json          # 編集する
 ./mcp-fuse -config config.json
 ```
 
+または [release](docs/deployment.md#releases) のバイナリ（`mcp-fuse-linux-amd64`、`SHA256SUMS` 付き）を使います。
+
 最小の設定:
 
 ```json

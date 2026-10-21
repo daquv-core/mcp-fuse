@@ -62,6 +62,8 @@ cp examples/config.json config.json          # edit it
 ./mcp-fuse -config config.json
 ```
 
+Or take the binary from a [release](docs/deployment.md#releases) (`mcp-fuse-linux-amd64`, with `SHA256SUMS`).
+
 A minimal configuration:
 
 ```json

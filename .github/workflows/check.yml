@@ -1,0 +1,30 @@
+name: check
+
+# Every pull request: gofmt, vet, a static build and the tests under the race detector, with the Go release the
+# Dockerfile builds with.
+
+on:
+  pull_request:
+
+concurrency:
+  group: check-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+      - name: Build
+        run: ./build.sh
+        env:
+          MCP_FUSE_VERSION: pr-${{ github.event.pull_request.head.sha }}
+      - name: Test
+        run: go test -race ./...
