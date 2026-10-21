@@ -9,6 +9,13 @@ import (
 	"time"
 )
 
+func errText(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
+}
+
 // kind describes one family of things a backend lists and a client then asks for by name.
 type kind struct {
 	key   string // member of the list result that holds the items
@@ -32,29 +39,33 @@ var callKinds = map[string]string{
 }
 
 type listing struct {
-	items       []json.RawMessage
-	owner       map[string]int
-	ok          int
-	unauth      *reply
-	sessionGone bool
+	items  []json.RawMessage
+	owner  map[string]int
+	ok     int // backends that answered
+	failed int // backends that should have answered and did not
 }
 
 type pages struct {
-	items []json.RawMessage
-	rep   reply
+	items   []json.RawMessage
+	rep     reply
+	skipped bool // the person has not connected this backend
 }
 
 const maxPages = 20
 
-// collect lists every backend as the caller, merges the answers in configuration order, and remembers who owns
-// what. A backend that does not answer is left out; its tools come back when it does. When two backends offer
-// the same name the earlier one in the configuration keeps it - both being dropped would take a working
-// backend's tool away because of an unrelated one - and the clash is logged.
+// collect lists every backend the person has connected, as that person, merges the answers in configuration
+// order, and remembers who owns what. A backend that does not answer is left out; its tools come back when it
+// does. When two backends offer the same name the earlier one in the configuration keeps it - both being dropped
+// would take a working backend's tool away because of an unrelated one - and the clash is logged.
 func (f *Fuse) collect(ctx context.Context, c *call, method string) listing {
 	k := kinds[method]
 	got := make([]pages, len(f.cfg.Backends))
 	var wg sync.WaitGroup
 	for i := range f.cfg.Backends {
+		if !f.connected(c.person, i) {
+			got[i].skipped = true
+			continue
+		}
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
@@ -66,16 +77,15 @@ func (f *Fuse) collect(ctx context.Context, c *call, method string) listing {
 	l := listing{items: []json.RawMessage{}, owner: map[string]int{}}
 	for i, p := range got {
 		bk := f.cfg.Backends[i]
+		if p.skipped {
+			continue
+		}
 		if p.rep.err != nil {
-			if p.rep.sessionGone {
-				l.sessionGone = true
+			if !p.rep.notConnected {
+				l.failed++
+				f.log.Warn("list failed", "method", method, "backend", bk.Name, "status", p.rep.status,
+					"request_id", c.reqID, "error", errText(p.rep.err))
 			}
-			if p.rep.unauthorized && l.unauth == nil {
-				r := p.rep
-				l.unauth = &r
-			}
-			f.log.Warn("list failed", "method", method, "backend", bk.Name, "status", p.rep.status,
-				"request_id", c.reqID, "error", errText(p.rep.err))
 			continue
 		}
 		l.ok++
@@ -97,7 +107,7 @@ func (f *Fuse) collect(ctx context.Context, c *call, method string) listing {
 		}
 	}
 	if l.ok > 0 {
-		f.routes.put(routeKey{caller: callerKey(c.in), kind: method}, l.owner)
+		f.routes.put(routeKey{person: c.person, kind: method}, l.owner)
 	}
 	return l
 }
@@ -150,12 +160,8 @@ func (f *Fuse) list(w http.ResponseWriter, c *call, method string) {
 	ctx, cancel := context.WithTimeout(c.in.Context(), f.listTimeout)
 	defer cancel()
 	l := f.collect(ctx, c, method)
-	if l.sessionGone {
-		f.writeSessionGone(w, c)
-		return
-	}
-	if l.ok == 0 {
-		f.listFailure(w, c, l.unauth)
+	if l.ok == 0 && l.failed > 0 {
+		writeRPCError(w, http.StatusBadGateway, c.env.ID, codeBackend, "no backend available")
 		return
 	}
 	writeResult(w, c.env.ID, map[string]any{kinds[method].key: l.items})
@@ -172,17 +178,13 @@ func (f *Fuse) route(w http.ResponseWriter, c *call, listMethod string) {
 		writeRPCError(w, http.StatusOK, c.env.ID, codeInvalidParams, "missing "+k.param)
 		return
 	}
-	idx, ok := f.routes.get(routeKey{caller: callerKey(c.in), kind: listMethod}, name)
+	idx, ok := f.routes.get(routeKey{person: c.person, kind: listMethod}, name)
 	if !ok {
 		ctx, cancel := context.WithTimeout(c.in.Context(), f.listTimeout)
 		l := f.collect(ctx, c, listMethod)
 		cancel()
-		if l.sessionGone {
-			f.writeSessionGone(w, c)
-			return
-		}
-		if l.ok == 0 {
-			f.listFailure(w, c, l.unauth)
+		if l.ok == 0 && l.failed > 0 {
+			writeRPCError(w, http.StatusBadGateway, c.env.ID, codeBackend, "no backend available")
 			return
 		}
 		idx, ok = l.owner[name]

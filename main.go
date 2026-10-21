@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -33,10 +34,18 @@ func main() {
 		log.Error("invalid configuration", "error", err.Error())
 		os.Exit(1)
 	}
+	d, err := buildDeps(cfg)
+	if err != nil {
+		log.Error("cannot start", "error", err.Error())
+		os.Exit(1)
+	}
+	if cfg.Auth.IntrospectionURL == "" {
+		log.Warn("callers are not authenticated: every backend is configured with auth \"none\"")
+	}
 
 	srv := &http.Server{
 		Addr:              cfg.Listen,
-		Handler:           newFuse(cfg, log, version),
+		Handler:           newFuse(cfg, log, version, d),
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       120 * time.Second,
 		// No write timeout: a tool call can legitimately run for minutes and its response is streamed.
@@ -56,4 +65,46 @@ func main() {
 		log.Error("server stopped", "error", err.Error())
 		os.Exit(1)
 	}
+}
+
+// buildDeps opens what the configuration points at: the encrypted state and the means of identifying callers.
+func buildDeps(cfg Config) (deps, error) {
+	d := deps{clientSecrets: map[string]string{}}
+	for _, b := range cfg.Backends {
+		if b.ClientSecretFile != "" {
+			raw, err := os.ReadFile(b.ClientSecretFile)
+			if err != nil {
+				return deps{}, err
+			}
+			d.clientSecrets[b.Name] = strings.TrimSpace(string(raw))
+		}
+	}
+	for _, b := range cfg.Backends {
+		if b.oauth() {
+			secret, err := readSecret(cfg.SecretFile)
+			if err != nil {
+				return deps{}, err
+			}
+			st, err := openStore(cfg.StateFile, secret)
+			if err != nil {
+				return deps{}, err
+			}
+			d.secret, d.store = secret, st
+			break
+		}
+	}
+	if cfg.Auth.IntrospectionURL == "" {
+		d.auth = anonymous{}
+		return d, nil
+	}
+	clientSecret := ""
+	if cfg.Auth.ClientSecretFile != "" {
+		raw, err := os.ReadFile(cfg.Auth.ClientSecretFile)
+		if err != nil {
+			return deps{}, err
+		}
+		clientSecret = strings.TrimSpace(string(raw))
+	}
+	d.auth = newIntrospector(cfg.Auth.IntrospectionURL, cfg.Auth.ClientID, clientSecret, cfg.Resource)
+	return d, nil
 }

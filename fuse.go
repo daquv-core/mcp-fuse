@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net"
 	"net/http"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -17,6 +19,8 @@ import (
 // Mcp-Session-Id. Revisions are dates, so they compare as strings.
 const latestSupported = "2025-11-25"
 
+var validRequestID = regexp.MustCompile(`^[A-Za-z0-9._-]{1,64}$`)
+
 func newerThanSupported(v string) bool {
 	if len(v) != len("2006-01-02") || v[4] != '-' || v[7] != '-' {
 		return false
@@ -24,58 +28,89 @@ func newerThanSupported(v string) bool {
 	return v > latestSupported
 }
 
+// deps are the parts of a Fuse that come from outside the configuration file.
+type deps struct {
+	store         *store // nil when no backend needs a token
+	secret        []byte
+	auth          verifier
+	clientSecrets map[string]string // backend name -> secret of its pre-registered confidential client
+}
+
 type Fuse struct {
 	cfg         Config
-	client      *http.Client
+	client      *http.Client // MCP traffic to the backends; no overall timeout
+	aux         *http.Client // discovery, registration and token endpoints
 	log         *slog.Logger
 	version     string
 	routes      *routeCache
 	listTimeout time.Duration
-	primary     int // where requests with no owner of their own go: the stateful backend, else the first
+
+	auth          verifier
+	store         *store
+	secret        []byte
+	clientSecrets map[string]string
+
+	sessMu   sync.Mutex
+	sessions map[sessionKey]bsession
+
+	discMu sync.Mutex
+	disc   map[int]authInfo
+	regMu  sync.Mutex
+	locks  sync.Map // key -> *sync.Mutex
+
+	pendMu  sync.Mutex
+	pending map[string]pendingAuth
 }
 
 // call is one inbound request while it is being served.
 type call struct {
-	in    *http.Request
-	body  []byte
-	env   envelope
-	reqID string
-	start time.Time
+	in     *http.Request
+	body   []byte
+	env    envelope
+	person string // who the caller is, as the authorization server vouches
+	reqID  string
+	start  time.Time
 }
 
-func newFuse(cfg Config, log *slog.Logger, version string) *Fuse {
-	primary := 0
-	for i, b := range cfg.Backends {
-		if b.Stateful {
-			primary = i
-		}
-	}
+func newFuse(cfg Config, log *slog.Logger, version string, d deps) *Fuse {
+	dial := &net.Dialer{Timeout: 5 * time.Second, KeepAlive: 30 * time.Second}
 	return &Fuse{
 		cfg: cfg,
 		client: &http.Client{Transport: &http.Transport{
 			// Backends are addressed explicitly; an environment proxy must not sit between them and us.
 			Proxy:               nil,
-			DialContext:         (&net.Dialer{Timeout: 5 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
+			DialContext:         dial.DialContext,
 			TLSHandshakeTimeout: 10 * time.Second,
 			MaxIdleConnsPerHost: 32,
 			IdleConnTimeout:     90 * time.Second,
 			// No response-header timeout and no overall timeout: a tool call may run as long as it needs to.
 		}},
-		log:         log,
-		version:     version,
-		routes:      newRouteCache(60*time.Second, 1024),
-		listTimeout: time.Duration(cfg.ListTimeoutSeconds) * time.Second,
-		primary:     primary,
+		aux: &http.Client{Timeout: 15 * time.Second, Transport: &http.Transport{
+			Proxy: nil, DialContext: dial.DialContext, TLSHandshakeTimeout: 10 * time.Second,
+		}},
+		log:           log,
+		version:       version,
+		routes:        newRouteCache(60*time.Second, 1024),
+		listTimeout:   time.Duration(cfg.ListTimeoutSeconds) * time.Second,
+		auth:          d.auth,
+		store:         d.store,
+		secret:        d.secret,
+		clientSecrets: d.clientSecrets,
+		sessions:      map[sessionKey]bsession{},
+		disc:          map[int]authInfo{},
+		pending:       map[string]pendingAuth{},
 	}
 }
 
 func (f *Fuse) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	switch r.URL.Path {
-	case "/healthz":
+	switch {
+	case r.URL.Path == "/healthz":
 		writeFrame(w, http.StatusOK, map[string]string{"status": "ok", "version": f.version})
-	case f.cfg.prmPath, "/.well-known/oauth-protected-resource":
+	case r.URL.Path == f.cfg.prmPath || r.URL.Path == "/.well-known/oauth-protected-resource":
 		f.serveMetadata(w, r)
-	case f.cfg.mcpPath:
+	case strings.HasPrefix(r.URL.Path, f.cfg.connectBase+"/"):
+		f.serveConnect(w, r)
+	case r.URL.Path == f.cfg.mcpPath:
 		f.serveMCP(w, r)
 	default:
 		http.NotFound(w, r)
@@ -104,14 +139,24 @@ func (f *Fuse) serveMCP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// A client that speaks the 2026-07-28 revision tries it first and falls back to the `initialize` handshake
-	// when the server answers 400 with nothing that looks like a modern error. Serving such a request here
-	// would merge whatever the backends make of a handshake-less call - without the stateful one - and hand
-	// back a list that is quietly incomplete.
+	// when the server answers 400 with nothing that looks like a modern error.
 	if v := r.Header.Get("MCP-Protocol-Version"); newerThanSupported(v) {
 		http.Error(w, "unsupported protocol version "+v+"; this server speaks "+latestSupported+" and earlier",
 			http.StatusBadRequest)
 		return
 	}
+
+	token := bearerToken(r)
+	person, err := f.auth.verify(r.Context(), token)
+	switch {
+	case errors.Is(err, errUnauthenticated):
+		f.writeUnauthenticated(w, nil, token != "")
+		return
+	case err != nil:
+		writeRPCError(w, http.StatusServiceUnavailable, nil, codeBackend, "authentication unavailable")
+		return
+	}
+
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxBody))
 	if err != nil {
 		writeRPCError(w, http.StatusRequestEntityTooLarge, nil, codeInvalidRequest, "request too large")
@@ -129,10 +174,11 @@ func (f *Fuse) serveMCP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	reqID := r.Header.Get("X-Request-Id")
-	if reqID == "" {
-		reqID = newRequestID()
+	if !validRequestID.MatchString(reqID) {
+		reqID = newRequestID() // a caller-supplied id is only passed on if it is plainly an id
 	}
-	c := &call{in: r, body: body, env: env, reqID: reqID, start: time.Now()}
+	r = r.WithContext(context.WithValue(r.Context(), reqIDKey{}, reqID))
+	c := &call{in: r, body: body, env: env, person: person, reqID: reqID, start: time.Now()}
 
 	switch {
 	case env.Method == "":
@@ -153,63 +199,57 @@ func (f *Fuse) serveMCP(w http.ResponseWriter, r *http.Request) {
 			f.route(w, c, listMethod)
 			return
 		}
-		f.forward(w, c, f.primary, "")
+		idx := f.primary(person)
+		if idx < 0 {
+			writeRPCError(w, http.StatusOK, env.ID, codeNotConnected, "no backend is connected for this user")
+			return
+		}
+		f.forward(w, c, idx, "")
 	}
 }
 
-// notify passes a notification on and acknowledges it. "initialized" belongs to the one backend that holds
-// a session; anything else (a cancellation, above all) goes to every backend, because the one that owns the
-// request is not known here and a request id that means nothing to a backend is ignored by it.
-func (f *Fuse) notify(w http.ResponseWriter, c *call) {
-	var targets []int
-	if c.env.Method == "notifications/initialized" {
-		if f.cfg.Backends[f.primary].Stateful {
-			targets = []int{f.primary}
-		}
-	} else {
-		for i := range f.cfg.Backends {
-			targets = append(targets, i)
-		}
-	}
-
-	ctx, cancel := context.WithTimeout(c.in.Context(), f.listTimeout)
-	defer cancel()
-	var wg sync.WaitGroup
-	for _, i := range targets {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
-			req, err := f.outbound(ctx, i, c, c.body)
-			if err != nil {
-				return
-			}
-			resp, err := f.client.Do(req)
-			if err != nil {
-				f.log.Warn("notification not delivered", "backend", f.cfg.Backends[i].Name, "method", c.env.Method,
-					"request_id", c.reqID, "error", errKind(err))
-				return
-			}
-			_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
-			resp.Body.Close()
-		}(i)
-	}
-	wg.Wait()
-	w.WriteHeader(http.StatusAccepted)
-}
-
-// fanout sends the same body to every backend at once. The replies are index-aligned with the backends.
-func (f *Fuse) fanout(ctx context.Context, c *call, body []byte, id json.RawMessage) []reply {
-	reps := make([]reply, len(f.cfg.Backends))
-	var wg sync.WaitGroup
+// primary is where a request with no owner of its own goes: the first backend, in configuration order, that
+// can serve this person.
+func (f *Fuse) primary(person string) int {
 	for i := range f.cfg.Backends {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
-			reps[i] = f.rpc(ctx, i, c, body, id)
-		}(i)
+		if f.connected(person, i) {
+			return i
+		}
 	}
-	wg.Wait()
-	return reps
+	return -1
+}
+
+// notify passes a notification on and acknowledges it. The caller's "initialized" is absorbed: mcp-fuse does its
+// own handshakes with the backends. Anything else (a cancellation, above all) goes to every backend that has a
+// session for this person, because which one owns the request is not known here and a request id that means
+// nothing to a backend is ignored by it.
+func (f *Fuse) notify(w http.ResponseWriter, c *call) {
+	if c.env.Method != "notifications/initialized" {
+		ctx, cancel := context.WithTimeout(c.in.Context(), f.listTimeout)
+		defer cancel()
+		var wg sync.WaitGroup
+		for i := range f.cfg.Backends {
+			if !f.connected(c.person, i) {
+				continue
+			}
+			wg.Add(1)
+			go func(i int) {
+				defer wg.Done()
+				resp, err := f.do(ctx, c.person, i, c.body, false)
+				if err != nil {
+					if !errors.Is(err, errNoSession) && !errors.Is(err, errNotConnected) {
+						f.log.Warn("notification not delivered", "backend", f.cfg.Backends[i].Name, "method", c.env.Method,
+							"request_id", c.reqID, "error", err.Error())
+					}
+					return
+				}
+				_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
+				resp.Body.Close()
+			}(i)
+		}
+		wg.Wait()
+	}
+	w.WriteHeader(http.StatusAccepted)
 }
 
 type initResult struct {
@@ -218,36 +258,67 @@ type initResult struct {
 	Instructions    string         `json:"instructions"`
 }
 
-// initialize asks every backend and answers with what they have in common: the oldest protocol version any of
-// them speaks, the union of their capabilities, and their instructions one after another under the backend's
-// name. The session id handed back is the stateful backend's own.
+// initialize opens a session with every backend the person has connected and answers with what they have in
+// common: the oldest protocol version any of them speaks, the union of their capabilities, and their
+// instructions one after another under the backend's name. A backend the person has not connected yet is
+// described in the instructions together with the link that connects it - the one way this server has to say it.
 func (f *Fuse) initialize(w http.ResponseWriter, c *call) {
 	ctx, cancel := context.WithTimeout(c.in.Context(), f.listTimeout)
 	defer cancel()
-	reps := f.fanout(ctx, c, c.body, c.env.ID)
+
+	type outcome struct {
+		env          envelope
+		err          error
+		notConnected bool
+	}
+	outs := make([]outcome, len(f.cfg.Backends))
+	var wg sync.WaitGroup
+	for i := range f.cfg.Backends {
+		if !f.connected(c.person, i) {
+			outs[i].notConnected = true
+			continue
+		}
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			o, err := withToken(f, ctx, c.person, i, func(token string) (opened, error) {
+				return f.open(ctx, c.person, i, token)
+			})
+			if err != nil {
+				outs[i].err = err
+				outs[i].notConnected = errors.Is(err, errNotConnected)
+				return
+			}
+			outs[i].env = o.env
+		}(i)
+	}
+	wg.Wait()
 
 	var (
 		version string
 		caps    = map[string]any{}
 		parts   []string
-		sid     string
+		links   []string
 		ok      int
-		unauth  *reply
+		failed  int
 	)
-	for i, rep := range reps {
+	for i, o := range outs {
 		bk := f.cfg.Backends[i]
-		if rep.err != nil {
-			if rep.unauthorized && unauth == nil {
-				r := rep
-				unauth = &r
-			}
-			f.log.Warn("initialize failed", "backend", bk.Name, "status", rep.status, "request_id", c.reqID, "error", errText(rep.err))
+		if o.notConnected {
+			links = append(links, "- "+bk.Name+": not connected for you yet. Ask the user to open this link in a browser and sign in "+
+				"(valid for 10 minutes), then start the conversation again: "+f.connectURL(c.person, bk.Name))
+			continue
+		}
+		if o.err != nil {
+			failed++
+			f.log.Warn("initialize failed", "backend", bk.Name, "request_id", c.reqID, "error", o.err.Error())
 			continue
 		}
 		var res initResult
-		dec := json.NewDecoder(bytes.NewReader(rep.env.Result))
+		dec := json.NewDecoder(bytes.NewReader(o.env.Result))
 		dec.UseNumber()
 		if err := dec.Decode(&res); err != nil {
+			failed++
 			f.log.Warn("initialize result unreadable", "backend", bk.Name, "request_id", c.reqID)
 			continue
 		}
@@ -259,20 +330,16 @@ func (f *Fuse) initialize(w http.ResponseWriter, c *call) {
 		if text := strings.TrimSpace(res.Instructions); text != "" {
 			parts = append(parts, "["+bk.Name+"]\n"+text)
 		}
-		if s := rep.header.Get(sessionHeader); s != "" {
-			if bk.Stateful {
-				sid = s
-			} else {
-				f.log.Warn("backend issued a session but is not configured as stateful; the id is dropped", "backend", bk.Name)
-			}
-		}
 	}
-	if ok == 0 {
-		f.listFailure(w, c, unauth)
+	if ok == 0 && failed > 0 {
+		writeRPCError(w, http.StatusBadGateway, c.env.ID, codeBackend, "no backend available")
 		return
 	}
-	if f.cfg.Backends[f.primary].Stateful && sid == "" {
-		f.log.Warn("the stateful backend gave no session; calls to it will be refused", "backend", f.cfg.Backends[f.primary].Name, "request_id", c.reqID)
+	if version == "" {
+		version = latestSupported
+	}
+	if len(links) > 0 {
+		parts = append(parts, "[mcp-fuse]\n"+strings.Join(links, "\n"))
 	}
 
 	result := map[string]any{
@@ -283,29 +350,9 @@ func (f *Fuse) initialize(w http.ResponseWriter, c *call) {
 	if len(parts) > 0 {
 		result["instructions"] = strings.Join(parts, "\n\n")
 	}
-	if sid != "" {
-		w.Header().Set(sessionHeader, sid)
-	}
 	writeResult(w, c.env.ID, result)
 	f.log.Info("call", "method", "initialize", "backend", "*", "status", http.StatusOK,
 		"ms", time.Since(c.start).Milliseconds(), "request_id", c.reqID)
-}
-
-// listFailure answers when no backend could be reached for a merged request: 401 if any of them asked the
-// caller to authenticate, 502 otherwise.
-func (f *Fuse) listFailure(w http.ResponseWriter, c *call, unauth *reply) {
-	if unauth != nil {
-		f.writeUnauthorized(w, c.env.ID, unauth.header)
-		return
-	}
-	writeRPCError(w, http.StatusBadGateway, c.env.ID, codeBackend, "no backend available")
-}
-
-// writeSessionGone answers 404, the specification's signal that the client must start a new session. Dropping the
-// stateful backend from a merged answer instead would hand back a list that is quietly incomplete, and the
-// client would never learn that it has to initialize again.
-func (f *Fuse) writeSessionGone(w http.ResponseWriter, c *call) {
-	writeRPCError(w, http.StatusNotFound, c.env.ID, codeSessionGone, "session not found")
 }
 
 // mergeInto folds src into dst: objects are merged key by key, a flag is on if it is on in either, and for
@@ -328,11 +375,4 @@ func mergeInto(dst, src map[string]any) {
 			}
 		}
 	}
-}
-
-func errText(err error) string {
-	if err == nil {
-		return ""
-	}
-	return err.Error()
 }
