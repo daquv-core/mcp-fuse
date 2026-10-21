@@ -98,6 +98,10 @@ mcp-fuse を登録します（[authorization](docs/authorization.md)）。**イ�
 - [Protocol](docs/protocol.md) — 扱うもの、対応する MCP リビジョン、エラー。
 - [Contributing](CONTRIBUTING.md)、[脆弱性の報告](SECURITY.md)。
 
+## ライセンス
+
+Apache License 2.0 です。[LICENSE](LICENSE) を参照してください。
+
 ## 翻訳
 
 [`README.md`](README.md)（英語）が原本で、このファイルと [`README.ko.md`](README.ko.md) がそれに従います。原本を

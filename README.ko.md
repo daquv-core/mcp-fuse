@@ -98,6 +98,10 @@ cp examples/config.json config.json          # 편집
 - [Protocol](docs/protocol.md) — 처리하는 것, 지원하는 MCP 개정, 오류.
 - [Contributing](CONTRIBUTING.md), [취약점 제보](SECURITY.md).
 
+## 라이선스
+
+Apache License 2.0입니다. [LICENSE](LICENSE)를 보세요.
+
 ## 번역
 
 [`README.md`](README.md)(영문)가 원본이고, 이 문서와 [`README.ja.md`](README.ja.md)가 따릅니다. 원본이 바뀌면 세
