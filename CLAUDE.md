@@ -23,7 +23,8 @@ production** - handing a version string to CP is the whole deployment interface 
 - One backend failing leaves the others' tools in place.
 
 ## Documentation model
-- `README.md` - what it is, what it does not do, how to run it.
+- `README.md` - what it is, what it does not do, how to run it. English is the source;
+  `README.ko.md` and `README.ja.md` are translations that follow it. Change all three together.
 - `docs/cp_share/` - the contract with control-plane. Self-contained: it never points at a document that lives in
   another repository.
 - Never write the same fact in two places.

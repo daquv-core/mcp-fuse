@@ -27,6 +27,7 @@ type fakeBackend struct {
 	callReply    map[string]string // tool name -> exact bytes sent back
 	sse          bool              // answer lists as an event stream
 	denyAuth     bool              // answer 401 to everything
+	staleSession string            // answer 404 to requests that carry this session id
 	challenge    string
 
 	mu   sync.Mutex
@@ -60,6 +61,10 @@ func (b *fakeBackend) handle(w http.ResponseWriter, r *http.Request) {
 	b.seen = append(b.seen, seenRequest{header: r.Header.Clone(), body: body, method: env.Method})
 	b.mu.Unlock()
 
+	if b.staleSession != "" && r.Header.Get("Mcp-Session-Id") == b.staleSession {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
 	if b.denyAuth {
 		if b.challenge != "" {
 			w.Header().Set("WWW-Authenticate", b.challenge)
@@ -548,5 +553,32 @@ func TestNewerRevisionIsRefusedSoClientsFallBack(t *testing.T) {
 		if resp, _ := post(t, srv, list, map[string]string{"MCP-Protocol-Version": v}); resp.StatusCode != http.StatusOK {
 			t.Errorf("version %q -> %d", v, resp.StatusCode)
 		}
+	}
+}
+
+// A session the stateful backend has forgotten must surface as 404 so the client initializes again; leaving the
+// backend out of the list would silently drop its tools.
+func TestExpiredSessionIsAnswered404NotQuietlyDropped(t *testing.T) {
+	quvi := newBackend(t, &fakeBackend{session: "s-1", staleSession: "s-old", tools: []string{"AskData"}})
+	exec := newBackend(t, &fakeBackend{tools: []string{"CreateVoucher"}, callReply: map[string]string{"CreateVoucher": `{"jsonrpc":"2.0","id":1,"result":{}}`}})
+	srv, _, _ := newTestFuse(t, quvi, exec)
+
+	for _, body := range []string{
+		`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"AskData"}}`,
+	} {
+		resp, _ := post(t, srv, body, map[string]string{"Mcp-Session-Id": "s-old"})
+		if resp.StatusCode != http.StatusNotFound {
+			t.Errorf("%s -> %d, want 404", body, resp.StatusCode)
+		}
+	}
+	// The stateless backend does not care about that session: its own tools keep working.
+	if resp, _ := post(t, srv, `{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"CreateVoucher"}}`,
+		map[string]string{"Mcp-Session-Id": "s-old"}); resp.StatusCode != http.StatusOK {
+		t.Errorf("a stateless backend's tool must not be affected, got %d", resp.StatusCode)
+	}
+	if resp, data := post(t, srv, `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`, map[string]string{"Mcp-Session-Id": "s-1"}); resp.StatusCode != 200 ||
+		strings.Join(toolNames(t, data), ",") != "AskData,CreateVoucher" {
+		t.Errorf("a live session must still list everything: %d %s", resp.StatusCode, data)
 	}
 }
