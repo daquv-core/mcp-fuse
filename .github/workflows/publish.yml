@@ -1,0 +1,47 @@
+name: publish
+
+# Every push to main builds, tests and publishes the binary as ghcr.io/daquv-core/mcp-fuse:<commit sha> - the
+# `release` stage of the Dockerfile: FROM scratch, one layer, the binary alone. The binary's version is the commit.
+# Publishing is not deploying. A release (release.yml) takes its file from this image; it never rebuilds.
+#
+# Each push has its own concurrency group (its sha), so a newer push never replaces a queued one.
+
+on:
+  push:
+    branches: [main]
+    paths-ignore: ['**/*.md']
+  workflow_dispatch:
+
+concurrency:
+  group: publish-${{ github.sha }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+    env:
+      IMG: ghcr.io/daquv-core/mcp-fuse
+    steps:
+      - uses: actions/checkout@v4
+      # gofmt, vet, tests and the build all run inside the image build, so a failing check publishes nothing.
+      - name: Build
+        run: docker build --pull -q --target release --build-arg VERSION="${GITHUB_SHA}" -t "mcp-fuse:ci-${GITHUB_SHA}" .
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish
+        run: |
+          docker tag "mcp-fuse:ci-${GITHUB_SHA}" "$IMG:${GITHUB_SHA}"
+          docker push -q "$IMG:${GITHUB_SHA}"
+          # `:main` follows the newest commit; nothing should deploy from it.
+          docker buildx imagetools create -t "$IMG:main" "$IMG:${GITHUB_SHA}" >/dev/null \
+            || echo "::warning::could not move $IMG:main to ${GITHUB_SHA} (:${GITHUB_SHA} is published)"

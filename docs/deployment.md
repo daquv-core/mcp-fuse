@@ -8,6 +8,20 @@ agent ──TLS──> load balancer / reverse proxy ──HTTP──> mcp-fuse 
 person's browser ───────────────────────────────────────────────────────────────> backends' authorization servers
 ```
 
+## Releases
+
+Each release `vX.Y.Z` on GitHub carries `mcp-fuse-linux-amd64`, a static binary, and `SHA256SUMS`:
+
+```sh
+sha256sum -c SHA256SUMS
+chmod +x mcp-fuse-linux-amd64 && ./mcp-fuse-linux-amd64 -version
+```
+
+A release does not rebuild anything. Every commit on `main` is built, tested and published as
+`ghcr.io/daquv-core/mcp-fuse:<commit>` - an image holding the binary alone (`FROM scratch`, not runnable) - and a
+release carries the binary taken from the tagged commit's image. So `-version` prints the commit a release was made
+from, not the tag; the release notes name it.
+
 ## Build
 
 ```sh

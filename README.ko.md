@@ -64,6 +64,8 @@ cp examples/config.json config.json          # 편집
 ./mcp-fuse -config config.json
 ```
 
+또는 [release](docs/deployment.md#releases)의 바이너리(`mcp-fuse-linux-amd64`, `SHA256SUMS` 포함)를 받아 씁니다.
+
 최소 설정:
 
 ```json
