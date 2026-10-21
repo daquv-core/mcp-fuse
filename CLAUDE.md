@@ -55,5 +55,7 @@ one state file, one instance. `./build.sh` builds it; `go test -race ./...` test
 - `docs/` - backends (for people who build a server to put behind mcp-fuse), configuration, authorization,
   deployment, security, protocol. English. Each fact lives in one place and
   the other documents link to it.
+- Commit messages, pull request titles and descriptions, and issues are in English, and do not name systems that are
+  not part of this project.
 - Documents state what is true whatever the release: no "first implementation", "not released", "not yet" or
   "pending" notes. What is unsupported is listed as unsupported; what is open belongs in an issue.
