@@ -35,6 +35,7 @@ const (
 	codeInvalidParams  = -32602
 	codeUnauthorized   = -32001
 	codeBackend        = -32002
+	codeSessionGone    = -32003
 )
 
 func writeResult(w http.ResponseWriter, id json.RawMessage, result any) {

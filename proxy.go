@@ -54,6 +54,7 @@ type reply struct {
 	err           error
 	unauthorized  bool
 	methodMissing bool
+	sessionGone   bool // the stateful backend no longer knows the session the caller presented
 }
 
 // outbound builds the request for one backend. Every header the caller sent is passed on - a header that is
@@ -119,6 +120,10 @@ func (f *Fuse) rpc(ctx context.Context, idx int, c *call, body []byte, wantID js
 	case resp.StatusCode == http.StatusUnauthorized:
 		rep.unauthorized = true
 		rep.err = errors.New("unauthorized")
+		return rep
+	case resp.StatusCode == http.StatusNotFound && f.cfg.Backends[idx].Stateful && c.in.Header.Get(sessionHeader) != "":
+		rep.sessionGone = true
+		rep.err = errors.New("session not found")
 		return rep
 	case resp.StatusCode/100 != 2:
 		rep.err = fmt.Errorf("status %d", resp.StatusCode)

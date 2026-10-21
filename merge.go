@@ -32,10 +32,11 @@ var callKinds = map[string]string{
 }
 
 type listing struct {
-	items  []json.RawMessage
-	owner  map[string]int
-	ok     int
-	unauth *reply
+	items       []json.RawMessage
+	owner       map[string]int
+	ok          int
+	unauth      *reply
+	sessionGone bool
 }
 
 type pages struct {
@@ -66,6 +67,9 @@ func (f *Fuse) collect(ctx context.Context, c *call, method string) listing {
 	for i, p := range got {
 		bk := f.cfg.Backends[i]
 		if p.rep.err != nil {
+			if p.rep.sessionGone {
+				l.sessionGone = true
+			}
 			if p.rep.unauthorized && l.unauth == nil {
 				r := p.rep
 				l.unauth = &r
@@ -146,6 +150,10 @@ func (f *Fuse) list(w http.ResponseWriter, c *call, method string) {
 	ctx, cancel := context.WithTimeout(c.in.Context(), f.listTimeout)
 	defer cancel()
 	l := f.collect(ctx, c, method)
+	if l.sessionGone {
+		f.writeSessionGone(w, c)
+		return
+	}
 	if l.ok == 0 {
 		f.listFailure(w, c, l.unauth)
 		return
@@ -169,6 +177,10 @@ func (f *Fuse) route(w http.ResponseWriter, c *call, listMethod string) {
 		ctx, cancel := context.WithTimeout(c.in.Context(), f.listTimeout)
 		l := f.collect(ctx, c, listMethod)
 		cancel()
+		if l.sessionGone {
+			f.writeSessionGone(w, c)
+			return
+		}
 		if l.ok == 0 {
 			f.listFailure(w, c, l.unauth)
 			return
