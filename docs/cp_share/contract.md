@@ -51,7 +51,10 @@ the keys are documented in `README.md`.
 ## 4. What CP registers where
 
 - **At the authorization server that callers log in at** (`authorization_servers`): mcp-fuse's address as a resource
-  (audience), and an introspection client (`auth.client_id` and its secret) allowed to introspect tokens issued for it.
+  (audience), and a client (`auth.client_id` and its secret) that may introspect tokens issued for it and that signs a
+  person in when a backend is connected - authorization code + PKCE (S256), redirect URI
+  `<resource origin><resource path>/connect/identify`, e.g. `https://mcp.example.com/mcp/connect/identify`. This sign-in
+  proves that the person opening a connect link is the person it was made for.
 - **At each backend's authorization server**: mcp-fuse as an OAuth client, with
   - redirect URI `<resource origin><resource path>/connect/callback`, e.g. `https://mcp.example.com/mcp/connect/callback`;
   - authorization code + PKCE (S256), refresh tokens, and the backend's address as the resource (RFC 8707).
@@ -80,7 +83,8 @@ location /.well-known/oauth-protected-resource {
 
 - This is the only place `X-Forwarded-*` belongs: between nginx and mcp-fuse. mcp-fuse does not forward it on.
 - Pass every request header through to mcp-fuse; `Authorization` and `MCP-Protocol-Version` must arrive.
-- `/mcp/connect/..` is opened by a person in a browser and must be reachable from there (it is under `/mcp`).
+- `/mcp/connect/..` is opened by a person in a browser and must be reachable from there (it is under `/mcp`). The
+  flow sets a cookie scoped to that path; do not strip `Set-Cookie` or `Cookie` on it.
 - A load balancer or WAF in front must allow `POST` and `GET`, keep idle connections open at least as long as
   `proxy_read_timeout`, and not buffer event streams.
 
