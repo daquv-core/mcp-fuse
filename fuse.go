@@ -34,6 +34,7 @@ type deps struct {
 	secret        []byte
 	auth          verifier
 	clientSecrets map[string]string // backend name -> secret of its pre-registered confidential client
+	frontSecret   string            // secret of the client mcp-fuse is at the callers' authorization server
 }
 
 type Fuse struct {
@@ -49,12 +50,14 @@ type Fuse struct {
 	store         *store
 	secret        []byte
 	clientSecrets map[string]string
+	frontSecret   string
 
 	sessMu   sync.Mutex
 	sessions map[sessionKey]bsession
 
 	discMu sync.Mutex
 	disc   map[int]authInfo
+	front  authInfo // the callers' authorization server, read once and kept for a while
 	regMu  sync.Mutex
 	locks  sync.Map // key -> *sync.Mutex
 
@@ -96,6 +99,7 @@ func newFuse(cfg Config, log *slog.Logger, version string, d deps) *Fuse {
 		store:         d.store,
 		secret:        d.secret,
 		clientSecrets: d.clientSecrets,
+		frontSecret:   d.frontSecret,
 		sessions:      map[sessionKey]bsession{},
 		disc:          map[int]authInfo{},
 		pending:       map[string]pendingAuth{},

@@ -38,11 +38,16 @@ backend は人ごとに 1 回接続します。
 
 1. エージェントが `initialize` を呼びます。その人がまだ接続していない backend ごとに、instructions にリンクが
    含まれます。
-2. その人がリンクをブラウザーで開きます。リンクはその backend の認可サーバーにつながります（backend の保護
-   リソースメタデータ、RFC 9728 で見つけます。PKCE 付きの authorization code で、resource indicator、RFC 8707 に
-   より backend に紐づけます）。
-3. そこでログインすると `mcp-fuse` に戻り、`mcp-fuse` がその人とその backend のトークンを暗号化して保管します。
+2. その人がリンクをブラウザーで開きます。まず `mcp-fuse` の呼び出し元がログインする認可サーバーでログインします。
+   これが「誰が接続しているか」の証明になり、リンクが作られた本人でなければなりません。他の人に渡したリンクでは
+   何も接続されません。
+3. 続いてその backend の認可サーバーに移ります（backend の保護リソースメタデータ、RFC 9728 で見つけます。PKCE 付きの
+   authorization code で、resource indicator、RFC 8707 により backend に紐づけます）。
+4. そこでログインすると `mcp-fuse` に戻り、`mcp-fuse` がその人とその backend のトークンを暗号化して保管します。
    エージェントが会話を始め直すと、その backend のツールが見えます。
+
+フロー全体は、リンクを開いたブラウザーで完了させる必要があります（cookie が各段階を結びつけます）。そのため、
+backend のログイン用アドレスだけを他の人に渡しても使えません。
 
 認可サーバーが refresh token を受け付けなくなると、その backend はその人の一覧から外れ、リンクが instructions に
 再び現れます。
@@ -97,7 +102,7 @@ JSON ファイル 1 つで、変更は再起動で反映されます。未知の
 | `listen` | バインドするアドレス。既定値は `127.0.0.1:8080`。 |
 | `resource` | エージェントが接続する公開 URL。MCP はこの URL のパスで提供されます。呼び出し元のトークンが持つべき audience です。 |
 | `authorization_servers` | エージェントがログインする先。どれにするかはデプロイ時の判断で、mcp-fuse は通知するだけです。 |
-| `auth.introspection_url`、`auth.client_id`、`auth.client_secret_file` | 呼び出し元のトークンを確認する方法（RFC 7662）。トークンは有効で、subject を持ち、`resource` を audience に含む必要があります。すべての backend が `"auth": "none"` の場合に限り `auth` を省略できます。 |
+| `auth.introspection_url`、`auth.client_id`、`auth.client_secret_file` | 呼び出し元のトークンを確認する方法（RFC 7662）。トークンは有効で、subject を持ち、`resource` を audience に含む必要があります。同じ client が backend の接続時に人をログインさせます（PKCE 付きの authorization code）。redirect URI として `<resource の origin><resource のパス>/connect/identify` を登録します。すべての backend が `"auth": "none"` の場合に限り `auth` を省略できます。 |
 | `state_file` | grant を暗号化して保管するファイル。失うと全員が接続し直すことになります。 |
 | `secret_file` | 32 バイト以上。`state_file` と接続リンクの鍵はここから導出されます。 |
 | `backends[].name` | 重複不可。ログ、instructions、接続リンクに表示されます。`/`、`?`、`#`、空白は使えません。 |
@@ -115,6 +120,7 @@ backend の認可サーバーに登録する redirect URI は `<resource の ori
 |---|---|
 | `POST <resource のパス>` | MCP。`GET` と `DELETE` には 405 を返します。 |
 | `GET <resource のパス>/connect/<backend>?t=…` | backend の接続を開始します。リンクは instructions で渡され、10 分間有効です。 |
+| `GET <resource のパス>/connect/identify` | 呼び出し元の認可サーバーでログインした後に戻る先。 |
 | `GET <resource のパス>/connect/callback` | backend の認可サーバーが人を戻す先。 |
 | `GET /.well-known/oauth-protected-resource[/<resource のパス>]` | 保護リソースメタデータ（[RFC 9728](https://www.rfc-editor.org/rfc/rfc9728)）: 設定の `resource` と `authorization_servers`。 |
 | `GET /healthz` | `{"status":"ok","version":"…"}`。backend の疎通は確認しません。 |

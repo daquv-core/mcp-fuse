@@ -99,8 +99,20 @@ func (f *Fuse) discover(ctx context.Context, idx int) (authInfo, error) {
 	if len(prm.AuthorizationServers) == 0 {
 		return authInfo{}, errors.New("protected resource metadata names no authorization server")
 	}
-	issuer := prm.AuthorizationServers[0]
+	a, err := f.asMetadata(ctx, prm.AuthorizationServers[0])
+	if err != nil {
+		return authInfo{}, err
+	}
+	if scope == "" {
+		scope = strings.Join(prm.ScopesSupported, " ")
+	}
+	a.resource, a.scope = prm.Resource, scope
+	f.disc[idx] = a
+	return a, nil
+}
 
+// asMetadata reads an authorization server's metadata (RFC 8414) and refuses one that cannot be used safely.
+func (f *Fuse) asMetadata(ctx context.Context, issuer string) (authInfo, error) {
 	var meta struct {
 		Issuer                string   `json:"issuer"`
 		AuthorizationEndpoint string   `json:"authorization_endpoint"`
@@ -127,15 +139,26 @@ func (f *Fuse) discover(ctx context.Context, idx int) (authInfo, error) {
 	if meta.AuthorizationEndpoint == "" || meta.TokenEndpoint == "" {
 		return authInfo{}, errors.New("authorization server metadata lacks an endpoint")
 	}
-	if scope == "" {
-		scope = strings.Join(prm.ScopesSupported, " ")
+	return authInfo{
+		issuer: issuer, authEndpoint: meta.AuthorizationEndpoint, tokenEndpoint: meta.TokenEndpoint,
+		regEndpoint: meta.RegistrationEndpoint, issParam: meta.IssParam, authMethods: meta.AuthMethods,
+		fetched: time.Now(),
+	}, nil
+}
+
+// frontAS is the authorization server callers of mcp-fuse log in at. A person who opens a connect link signs in
+// there first, so that the link is completed by the person it names and by nobody else.
+func (f *Fuse) frontAS(ctx context.Context) (authInfo, error) {
+	f.discMu.Lock()
+	defer f.discMu.Unlock()
+	if f.front.issuer != "" && time.Since(f.front.fetched) < discoveryTTL {
+		return f.front, nil
 	}
-	a := authInfo{
-		resource: prm.Resource, issuer: issuer, authEndpoint: meta.AuthorizationEndpoint,
-		tokenEndpoint: meta.TokenEndpoint, regEndpoint: meta.RegistrationEndpoint, scope: scope,
-		issParam: meta.IssParam, authMethods: meta.AuthMethods, fetched: time.Now(),
+	a, err := f.asMetadata(ctx, f.cfg.AuthorizationServers[0])
+	if err != nil {
+		return authInfo{}, err
 	}
-	f.disc[idx] = a
+	f.front = a
 	return a, nil
 }
 
@@ -250,13 +273,16 @@ type clientAuth struct {
 }
 
 func (f *Fuse) clientAuthFor(idx int, a authInfo) clientAuth {
-	secret := f.clientSecrets[f.cfg.Backends[idx].Name]
+	return chooseClientAuth(f.clientSecrets[f.cfg.Backends[idx].Name], a.authMethods)
+}
+
+func chooseClientAuth(secret string, methods []string) clientAuth {
 	if secret == "" {
 		return clientAuth{}
 	}
-	basic := len(a.authMethods) == 0
+	basic := len(methods) == 0
 	post := false
-	for _, m := range a.authMethods {
+	for _, m := range methods {
 		basic = basic || m == "client_secret_basic"
 		post = post || m == "client_secret_post"
 	}
