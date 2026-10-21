@@ -301,6 +301,13 @@ func (f *Fuse) listFailure(w http.ResponseWriter, c *call, unauth *reply) {
 	writeRPCError(w, http.StatusBadGateway, c.env.ID, codeBackend, "no backend available")
 }
 
+// writeSessionGone answers 404, the specification's signal that the client must start a new session. Dropping the
+// stateful backend from a merged answer instead would hand back a list that is quietly incomplete, and the
+// client would never learn that it has to initialize again.
+func (f *Fuse) writeSessionGone(w http.ResponseWriter, c *call) {
+	writeRPCError(w, http.StatusNotFound, c.env.ID, codeSessionGone, "session not found")
+}
+
 // mergeInto folds src into dst: objects are merged key by key, a flag is on if it is on in either, and for
 // anything else the first value wins.
 func mergeInto(dst, src map[string]any) {
