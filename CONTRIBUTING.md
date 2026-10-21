@@ -39,6 +39,11 @@ way, from `internal/fuse` to the other packages.
   Japanese READMEs are translations of the English one, nothing more.)
 - **A small diff.** Keep a change to one thing.
 
+## License
+
+mcp-fuse is under the [Apache License 2.0](LICENSE). Unless you say otherwise, a contribution you submit is
+licensed under the same terms (section 5 of the license).
+
 ## Security
 
 Do not open a public issue for a vulnerability; see [SECURITY.md](SECURITY.md).

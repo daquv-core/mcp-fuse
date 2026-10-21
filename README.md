@@ -94,6 +94,10 @@ the authorization servers ([authorization](docs/authorization.md)). Run **one in
 - [Protocol](docs/protocol.md) — what it handles, which MCP revisions, errors.
 - [Contributing](CONTRIBUTING.md) and [reporting a vulnerability](SECURITY.md).
 
+## License
+
+Apache License 2.0. See [LICENSE](LICENSE).
+
 ## Translations
 
 [`README.ko.md`](README.ko.md) and [`README.ja.md`](README.ja.md) follow this file. When this file changes, change
