@@ -106,5 +106,6 @@ func buildDeps(cfg Config) (deps, error) {
 		clientSecret = strings.TrimSpace(string(raw))
 	}
 	d.auth = newIntrospector(cfg.Auth.IntrospectionURL, cfg.Auth.ClientID, clientSecret, cfg.Resource)
+	d.frontSecret = clientSecret
 	return d, nil
 }

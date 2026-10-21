@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/http/cookiejar"
 	"net/http/httptest"
 	"net/url"
 	"os"
@@ -57,7 +58,7 @@ func newAS(t *testing.T) *fakeAS {
 	as := &fakeAS{
 		codes: map[string]*codeRec{}, tokens: map[string]tokRec{}, refreshTokens: map[string]refRec{},
 		front: map[string]frontRec{}, expiresIn: 3600, issParam: true, loginAs: "alice",
-		confidential: map[string]string{}, authMethods: []string{"none", "client_secret_basic"},
+		confidential: map[string]string{"fuse": "s3cret"}, authMethods: []string{"none", "client_secret_basic"},
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/.well-known/oauth-authorization-server", as.metadata)
@@ -191,7 +192,11 @@ func (as *fakeAS) introspect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = r.ParseForm()
-	rec, ok := as.front[r.PostForm.Get("token")]
+	token := r.PostForm.Get("token")
+	rec, ok := as.front[token]
+	if t, issued := as.tokens[token]; !ok && issued {
+		rec, ok = frontRec{sub: t.sub, aud: t.aud}, true
+	}
 	if !ok {
 		writeFrame(w, 200, map[string]any{"active": false})
 		return
@@ -454,7 +459,7 @@ func newWorldWith(t *testing.T, open map[int]bool, tweak func(*Config, *deps, *f
 		t.Fatal(err)
 	}
 	d := deps{store: st, secret: w.secret, auth: newIntrospector(as.srv.URL+"/introspect", "fuse", "s3cret", resource),
-		clientSecrets: map[string]string{}}
+		clientSecrets: map[string]string{}, frontSecret: "s3cret"}
 	if tweak != nil {
 		tweak(&cfg, &d, as)
 		if err := cfg.validate(); err != nil {
@@ -469,6 +474,23 @@ func newWorldWith(t *testing.T, open map[int]bool, tweak func(*Config, *deps, *f
 	as.front[aliceToken] = frontRec{sub: "alice", aud: resource}
 	as.front[bobToken] = frontRec{sub: "bob", aud: resource}
 	return w
+}
+
+// newBrowser is a client that keeps cookies and follows redirects.
+func newBrowser() *http.Client {
+	jar, _ := cookiejar.New(nil)
+	return &http.Client{Jar: jar}
+}
+
+// linkFor reads the connect link for a backend out of what the assistant was told at initialize.
+func (w *world) linkFor(token, backend string) string {
+	w.t.Helper()
+	_, data := w.post(token, initBody, nil)
+	m := regexp.MustCompile(`http://\S+/connect/` + backend + `\?t=\S+`).FindString(instructionsOf(w.t, data))
+	if m == "" {
+		w.t.Fatalf("no connect link for %s in %s", backend, data)
+	}
+	return m
 }
 
 func (w *world) post(token, body string, headers map[string]string) (*http.Response, []byte) {
@@ -510,7 +532,7 @@ func (w *world) connect(person, token, backend string) {
 	if m == "" {
 		w.t.Fatalf("no connect link for %s in %s", backend, data)
 	}
-	resp, err := http.Get(m)
+	resp, err := newBrowser().Get(m)
 	if err != nil {
 		w.t.Fatal(err)
 	}

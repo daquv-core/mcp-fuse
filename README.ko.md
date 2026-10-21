@@ -38,11 +38,16 @@ backend는 사람마다 한 번 연결합니다.
 
 1. 에이전트가 `initialize`를 호출합니다. 그 사람이 아직 연결하지 않은 backend마다 instructions에 링크가 들어
    있습니다.
-2. 사람이 링크를 브라우저에서 엽니다. 링크는 그 backend의 인가 서버로 이어집니다(backend의 보호 자원
-   메타데이터, RFC 9728로 찾으며, PKCE를 쓴 authorization code 방식이고 resource indicator, RFC 8707로
-   backend에 묶습니다).
-3. 거기서 로그인하면 `mcp-fuse`로 돌아오고, `mcp-fuse`는 그 사람과 그 backend의 token을 암호화해 보관합니다.
+2. 사람이 링크를 브라우저에서 엽니다. 먼저 `mcp-fuse` 호출자가 로그인하는 인가 서버에서 로그인합니다. 이것이
+   누가 연결하는지를 증명하며, 링크가 만들어진 바로 그 사람이어야 합니다. 다른 사람에게 넘긴 링크로는 아무것도
+   연결되지 않습니다.
+3. 이어서 그 backend의 인가 서버로 갑니다(backend의 보호 자원 메타데이터, RFC 9728로 찾으며, PKCE를 쓴
+   authorization code 방식이고 resource indicator, RFC 8707로 backend에 묶습니다).
+4. 거기서 로그인하면 `mcp-fuse`로 돌아오고, `mcp-fuse`는 그 사람과 그 backend의 token을 암호화해 보관합니다.
    에이전트가 대화를 다시 시작하면 그 backend의 도구가 보입니다.
+
+전 과정은 링크를 연 브라우저에서 끝내야 합니다(cookie가 단계를 묶습니다). 그래서 backend 로그인 주소만 다른
+사람에게 넘겨서는 쓸 수 없습니다.
 
 인가 서버가 refresh token을 더는 받아 주지 않으면 그 backend는 그 사람의 목록에서 빠지고, 링크가 instructions에
 다시 나타납니다.
@@ -97,7 +102,7 @@ JSON 파일 하나이며, 바꾸면 재기동해야 반영됩니다. 알 수 없
 | `listen` | 바인드할 주소. 기본값 `127.0.0.1:8080`. |
 | `resource` | 에이전트가 접속하는 공개 URL. MCP는 이 URL의 경로에서 서비스합니다. 호출자의 token이 가져야 할 audience입니다. |
 | `authorization_servers` | 에이전트가 로그인할 곳. 무엇으로 할지는 배포 시 정하며, mcp-fuse는 알려 주기만 합니다. |
-| `auth.introspection_url`, `auth.client_id`, `auth.client_secret_file` | 호출자 token을 확인하는 방법(RFC 7662). token은 활성 상태이고, subject가 있고, `resource`를 audience로 가져야 합니다. 모든 backend가 `"auth": "none"`일 때만 `auth`를 생략할 수 있습니다. |
+| `auth.introspection_url`, `auth.client_id`, `auth.client_secret_file` | 호출자 token을 확인하는 방법(RFC 7662). token은 활성 상태이고, subject가 있고, `resource`를 audience로 가져야 합니다. 같은 client가 backend를 연결할 때 사람을 로그인시킵니다(PKCE를 쓴 authorization code). redirect URI로 `<resource의 origin><resource 경로>/connect/identify`를 등록합니다. 모든 backend가 `"auth": "none"`일 때만 `auth`를 생략할 수 있습니다. |
 | `state_file` | grant를 암호화해 보관하는 파일. 잃으면 모두가 다시 연결해야 합니다. |
 | `secret_file` | 32바이트 이상. `state_file`과 연결 링크의 키가 여기서 파생됩니다. |
 | `backends[].name` | 중복 불가. 로그, instructions, 연결 링크에 표시됩니다. `/`, `?`, `#`, 공백은 쓸 수 없습니다. |
@@ -115,6 +120,7 @@ backend의 인가 서버에 등록할 redirect URI는 `<resource의 origin><reso
 |---|---|
 | `POST <resource 경로>` | MCP. `GET`과 `DELETE`는 405로 답합니다. |
 | `GET <resource 경로>/connect/<backend>?t=…` | backend 연결을 시작합니다. 링크는 instructions로 전달되며 10분간 유효합니다. |
+| `GET <resource 경로>/connect/identify` | 호출자의 인가 서버에서 로그인한 뒤 돌아오는 곳. |
 | `GET <resource 경로>/connect/callback` | backend의 인가 서버가 사람을 돌려보내는 곳. |
 | `GET /.well-known/oauth-protected-resource[/<resource 경로>]` | 보호 자원 메타데이터([RFC 9728](https://www.rfc-editor.org/rfc/rfc9728)): 설정의 `resource`와 `authorization_servers`. |
 | `GET /healthz` | `{"status":"ok","version":"…"}`. backend를 확인하지는 않습니다. |
