@@ -1,12 +1,14 @@
-package main
+package fuse
 
 import (
-	"crypto/sha256"
 	"crypto/subtle"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/daquv-core/mcp-fuse/internal/oauthc"
+	"github.com/daquv-core/mcp-fuse/internal/state"
 )
 
 // The pages where a person connects a backend. The link handed out in the instructions carries a ticket that
@@ -26,7 +28,7 @@ type pendingAuth struct {
 	idx      int
 	nonce    string // identifies the browser the flow began in
 	verifier string
-	info     authInfo
+	info     oauthc.Info
 	clientID string
 	expires  time.Time
 }
@@ -65,11 +67,11 @@ func (f *Fuse) takePending(state, kind string) (pendingAuth, bool) {
 }
 
 func (f *Fuse) connectURL(person, backend string) string {
-	t := signTicket(f.secret, ticket{Person: person, Backend: backend, Expires: time.Now().Add(ticketTTL).Unix()})
-	return f.cfg.origin + f.cfg.connectBase + "/" + url.PathEscape(backend) + "?t=" + url.QueryEscape(t)
+	t := state.SignTicket(f.secret, state.Ticket{Person: person, Backend: backend, Expires: time.Now().Add(state.TicketTTL).Unix()})
+	return f.cfg.Origin + f.cfg.ConnectBase + "/" + url.PathEscape(backend) + "?t=" + url.QueryEscape(t)
 }
 
-func (f *Fuse) identifyURI() string { return f.cfg.origin + f.cfg.connectBase + identifyPath }
+func (f *Fuse) identifyURI() string { return f.cfg.Origin + f.cfg.ConnectBase + identifyPath }
 
 func (f *Fuse) serveConnect(w http.ResponseWriter, r *http.Request) {
 	if f.store == nil {
@@ -81,14 +83,14 @@ func (f *Fuse) serveConnect(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	switch rest := "/" + strings.TrimPrefix(r.URL.Path, f.cfg.connectBase+"/"); rest {
+	switch rest := "/" + strings.TrimPrefix(r.URL.Path, f.cfg.ConnectBase+"/"); rest {
 	case identifyPath:
 		f.connectIdentify(w, r)
 	case callbackPath:
 		f.connectCallback(w, r)
 	default:
 		for i, b := range f.cfg.Backends {
-			if "/"+b.Name == rest && b.oauth() {
+			if "/"+b.Name == rest && b.OAuth() {
 				f.connectStart(w, r, i)
 				return
 			}
@@ -99,8 +101,8 @@ func (f *Fuse) serveConnect(w http.ResponseWriter, r *http.Request) {
 
 func (f *Fuse) setFlowCookie(w http.ResponseWriter, nonce string, maxAge int) {
 	http.SetCookie(w, &http.Cookie{
-		Name: cookieName, Value: nonce, Path: f.cfg.connectBase, MaxAge: maxAge,
-		HttpOnly: true, Secure: strings.HasPrefix(f.cfg.origin, "https://"),
+		Name: cookieName, Value: nonce, Path: f.cfg.ConnectBase, MaxAge: maxAge,
+		HttpOnly: true, Secure: strings.HasPrefix(f.cfg.Origin, "https://"),
 		// Lax: the authorization servers send the browser back with a top-level GET, which Lax allows and
 		// which a cross-site request in the background is not.
 		SameSite: http.SameSiteLaxMode,
@@ -113,49 +115,27 @@ func sameBrowser(r *http.Request, nonce string) bool {
 	return err == nil && nonce != "" && subtle.ConstantTimeCompare([]byte(c.Value), []byte(nonce)) == 1
 }
 
-func newPKCE() (verifier, challenge string) {
-	verifier = randomToken(32)
-	sum := sha256.Sum256([]byte(verifier))
-	return verifier, b64(sum[:])
-}
-
-// authorizeURL builds the authorization request for either step.
-func authorizeURL(endpoint string, params map[string]string) (string, error) {
-	u, err := url.Parse(endpoint)
-	if err != nil {
-		return "", err
-	}
-	q := u.Query()
-	for k, v := range params {
-		if v != "" {
-			q.Set(k, v)
-		}
-	}
-	u.RawQuery = q.Encode()
-	return u.String(), nil
-}
-
 // connectStart opens the link: it pins the flow to this browser and sends the person to prove who they are.
 func (f *Fuse) connectStart(w http.ResponseWriter, r *http.Request, idx int) {
 	bk := f.cfg.Backends[idx]
-	t, err := verifyTicket(f.secret, r.URL.Query().Get("t"), time.Now())
+	t, err := state.VerifyTicket(f.secret, r.URL.Query().Get("t"), time.Now())
 	if err != nil || t.Backend != bk.Name {
 		connectPage(w, http.StatusBadRequest, false)
 		return
 	}
-	front, err := f.frontAS(r.Context())
+	front, err := f.oc.AS(r.Context(), f.cfg.AuthorizationServers[0])
 	if err != nil {
 		f.log.Warn("connect: sign-in server unavailable", "error", err.Error())
 		connectPage(w, http.StatusBadGateway, false)
 		return
 	}
 
-	nonce := randomToken(16)
-	state := randomToken(16)
-	verifier, challenge := newPKCE()
+	nonce := oauthc.RandomToken(16)
+	state := oauthc.RandomToken(16)
+	verifier, challenge := oauthc.NewPKCE()
 	f.addPending(state, pendingAuth{kind: kindIdentify, person: t.Person, idx: idx, nonce: nonce, verifier: verifier,
 		info: front, expires: time.Now().Add(pendingTTL)})
-	target, err := authorizeURL(front.authEndpoint, map[string]string{
+	target, err := oauthc.AuthorizeURL(front.AuthEndpoint, map[string]string{
 		"response_type": "code", "client_id": f.cfg.Auth.ClientID, "redirect_uri": f.identifyURI(),
 		"code_challenge": challenge, "code_challenge_method": "S256", "state": state, "resource": f.cfg.Resource,
 	})
@@ -183,21 +163,21 @@ func (f *Fuse) connectIdentify(w http.ResponseWriter, r *http.Request) {
 		connectPage(w, http.StatusBadRequest, false)
 		return
 	}
-	if iss := q.Get("iss"); (iss == "" && p.info.issParam) || (iss != "" && iss != p.info.issuer) {
+	if iss := q.Get("iss"); (iss == "" && p.info.IssParam) || (iss != "" && iss != p.info.Issuer) {
 		f.log.Warn("connect: sign-in response from an unexpected issuer")
 		connectPage(w, http.StatusBadRequest, false)
 		return
 	}
-	tr, err := f.postToken(r.Context(), p.info.tokenEndpoint, urlValues(
+	tr, err := f.oc.PostToken(r.Context(), p.info.TokenEndpoint, urlValues(
 		"grant_type", "authorization_code", "code", q.Get("code"), "redirect_uri", f.identifyURI(),
 		"client_id", f.cfg.Auth.ClientID, "code_verifier", p.verifier, "resource", f.cfg.Resource,
-	), chooseClientAuth(f.frontSecret, p.info.authMethods))
+	), oauthc.ChooseClientAuth(f.frontSecret, p.info.AuthMethods))
 	if err != nil {
 		f.log.Warn("connect: sign-in code exchange failed", "error", err.Error())
 		connectPage(w, http.StatusBadGateway, false)
 		return
 	}
-	who, err := f.auth.verify(r.Context(), tr.AccessToken)
+	who, err := f.auth.Verify(r.Context(), tr.AccessToken)
 	if err != nil {
 		f.log.Warn("connect: could not establish who signed in")
 		connectPage(w, http.StatusForbidden, false)
@@ -210,26 +190,26 @@ func (f *Fuse) connectIdentify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	info, err := f.discover(r.Context(), p.idx)
+	info, err := f.oc.Discover(r.Context(), p.idx)
 	if err != nil {
 		f.log.Warn("connect: discovery failed", "backend", bk.Name, "error", err.Error())
 		connectPage(w, http.StatusBadGateway, false)
 		return
 	}
-	clientID, err := f.clientID(r.Context(), p.idx, info)
+	clientID, err := f.oc.ClientID(r.Context(), p.idx, info)
 	if err != nil {
 		f.log.Warn("connect: no client identity", "backend", bk.Name, "error", err.Error())
 		connectPage(w, http.StatusBadGateway, false)
 		return
 	}
-	state := randomToken(16)
-	verifier, challenge := newPKCE()
+	state := oauthc.RandomToken(16)
+	verifier, challenge := oauthc.NewPKCE()
 	f.addPending(state, pendingAuth{kind: kindBackend, person: p.person, idx: p.idx, nonce: p.nonce, verifier: verifier,
 		info: info, clientID: clientID, expires: time.Now().Add(pendingTTL)})
-	target, err := authorizeURL(info.authEndpoint, map[string]string{
-		"response_type": "code", "client_id": clientID, "redirect_uri": f.redirectURI(),
+	target, err := oauthc.AuthorizeURL(info.AuthEndpoint, map[string]string{
+		"response_type": "code", "client_id": clientID, "redirect_uri": f.oc.RedirectURI,
 		"code_challenge": challenge, "code_challenge_method": "S256", "state": state,
-		"resource": info.resource, "scope": info.scope,
+		"resource": info.Resource, "scope": info.Scope,
 	})
 	if err != nil {
 		connectPage(w, http.StatusBadGateway, false)
@@ -260,23 +240,23 @@ func (f *Fuse) connectCallback(w http.ResponseWriter, r *http.Request) {
 	}
 	// RFC 9207: the response must come from the authorization server the flow began at. A server that says it adds
 	// `iss` must have added it; one that adds it must have added the right one.
-	if iss := q.Get("iss"); (iss == "" && p.info.issParam) || (iss != "" && iss != p.info.issuer) {
+	if iss := q.Get("iss"); (iss == "" && p.info.IssParam) || (iss != "" && iss != p.info.Issuer) {
 		f.log.Warn("connect: authorization response from an unexpected issuer", "backend", bk.Name)
 		connectPage(w, http.StatusBadRequest, false)
 		return
 	}
 
-	tr, err := f.postToken(r.Context(), p.info.tokenEndpoint, urlValues(
-		"grant_type", "authorization_code", "code", q.Get("code"), "redirect_uri", f.redirectURI(),
-		"client_id", p.clientID, "code_verifier", p.verifier, "resource", p.info.resource,
-	), f.clientAuthFor(p.idx, p.info))
+	tr, err := f.oc.PostToken(r.Context(), p.info.TokenEndpoint, urlValues(
+		"grant_type", "authorization_code", "code", q.Get("code"), "redirect_uri", f.oc.RedirectURI,
+		"client_id", p.clientID, "code_verifier", p.verifier, "resource", p.info.Resource,
+	), f.oc.ClientAuthFor(p.idx, p.info))
 	if err != nil {
 		f.log.Warn("connect: code exchange failed", "backend", bk.Name, "error", err.Error())
 		connectPage(w, http.StatusBadGateway, false)
 		return
 	}
-	g := grantFrom(tr, nil, p.clientID, p.info.tokenEndpoint, p.info.resource, time.Now())
-	if err := f.store.putGrant(p.person, bk.Name, g); err != nil {
+	g := oauthc.GrantFrom(tr, nil, p.clientID, p.info.TokenEndpoint, p.info.Resource, time.Now())
+	if err := f.store.Put(p.person, bk.Name, g); err != nil {
 		f.log.Error("connect: grant not stored", "backend", bk.Name, "error", err.Error())
 		connectPage(w, http.StatusInternalServerError, false)
 		return

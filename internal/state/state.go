@@ -1,4 +1,6 @@
-package main
+// Package state keeps what mcp-fuse must not lose: the grants people have given, encrypted in one file. It also
+// holds the signed tickets that carry a person to a connect page.
+package state
 
 import (
 	"bytes"
@@ -7,6 +9,7 @@ import (
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,9 +20,13 @@ import (
 	"time"
 )
 
-// grant is what one person has allowed mcp-fuse to do at one backend: the tokens that backend's authorization
+func b64(b []byte) string { return base64.RawURLEncoding.EncodeToString(b) }
+
+func unb64(s string) ([]byte, error) { return base64.RawURLEncoding.DecodeString(s) }
+
+// Grant is what one person has allowed mcp-fuse to do at one backend: the tokens that backend's authorization
 // server issued to mcp-fuse for that person.
-type grant struct {
+type Grant struct {
 	Access        string    `json:"a"`
 	Refresh       string    `json:"r,omitempty"`
 	Expiry        time.Time `json:"e"`
@@ -29,13 +36,13 @@ type grant struct {
 }
 
 type stateData struct {
-	Grants  map[string]map[string]*grant `json:"grants"`  // person -> backend -> grant
+	Grants  map[string]map[string]*Grant `json:"grants"`  // person -> backend -> grant
 	Clients map[string]string            `json:"clients"` // backend|issuer -> client_id from dynamic registration
 }
 
 // store keeps the grants in one file, encrypted. The key comes from the secret file; without it the file is
 // noise. Losing the file loses the grants, and every person connects again - nothing else depends on it.
-type store struct {
+type Store struct {
 	path string
 	aead cipher.AEAD
 	mu   sync.Mutex
@@ -46,8 +53,8 @@ const storeMagic = "MFS1"
 
 const minSecretBytes = 32
 
-// readSecret returns the secret file's content without surrounding whitespace.
-func readSecret(path string) ([]byte, error) {
+// ReadSecret returns the secret file's content without surrounding whitespace.
+func ReadSecret(path string) ([]byte, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
@@ -67,7 +74,8 @@ func deriveKey(secret []byte, purpose string) []byte {
 	return mac.Sum(nil)
 }
 
-func openStore(path string, secret []byte) (*store, error) {
+// Open reads the state file, or starts an empty state if there is none.
+func Open(path string, secret []byte) (*Store, error) {
 	block, err := aes.NewCipher(deriveKey(secret, "state"))
 	if err != nil {
 		return nil, err
@@ -76,7 +84,7 @@ func openStore(path string, secret []byte) (*store, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &store{path: path, aead: aead, d: stateData{Grants: map[string]map[string]*grant{}, Clients: map[string]string{}}}
+	s := &Store{path: path, aead: aead, d: stateData{Grants: map[string]map[string]*Grant{}, Clients: map[string]string{}}}
 
 	data, err := os.ReadFile(path)
 	switch {
@@ -97,7 +105,7 @@ func openStore(path string, secret []byte) (*store, error) {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
 	if s.d.Grants == nil {
-		s.d.Grants = map[string]map[string]*grant{}
+		s.d.Grants = map[string]map[string]*Grant{}
 	}
 	if s.d.Clients == nil {
 		s.d.Clients = map[string]string{}
@@ -107,7 +115,7 @@ func openStore(path string, secret []byte) (*store, error) {
 
 // saveLocked writes the file through a temporary one so that a crash leaves the old state, never half of a new
 // one. The caller holds s.mu.
-func (s *store) saveLocked() error {
+func (s *Store) saveLocked() error {
 	plain, err := json.Marshal(s.d)
 	if err != nil {
 		return err
@@ -142,27 +150,30 @@ func (s *store) saveLocked() error {
 	return os.Rename(tmp.Name(), s.path)
 }
 
-func (s *store) grant(person, backend string) (grant, bool) {
+// Get returns the grant a person has given for a backend.
+func (s *Store) Get(person, backend string) (Grant, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	g := s.d.Grants[person][backend]
 	if g == nil {
-		return grant{}, false
+		return Grant{}, false
 	}
 	return *g, true
 }
 
-func (s *store) putGrant(person, backend string, g grant) error {
+// Put stores or replaces a grant.
+func (s *Store) Put(person, backend string, g Grant) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.d.Grants[person] == nil {
-		s.d.Grants[person] = map[string]*grant{}
+		s.d.Grants[person] = map[string]*Grant{}
 	}
 	s.d.Grants[person][backend] = &g
 	return s.saveLocked()
 }
 
-func (s *store) deleteGrant(person, backend string) error {
+// Delete drops a grant; the person has to connect again.
+func (s *Store) Delete(person, backend string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.d.Grants[person][backend] == nil {
@@ -175,14 +186,16 @@ func (s *store) deleteGrant(person, backend string) error {
 	return s.saveLocked()
 }
 
-func (s *store) client(backend, issuer string) (string, bool) {
+// Client returns the client id registered for a backend at an issuer.
+func (s *Store) Client(backend, issuer string) (string, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	id, ok := s.d.Clients[backend+"|"+issuer]
 	return id, ok
 }
 
-func (s *store) putClient(backend, issuer, clientID string) error {
+// PutClient remembers a client id from dynamic registration.
+func (s *Store) PutClient(backend, issuer, clientID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.d.Clients[backend+"|"+issuer] = clientID
@@ -192,15 +205,17 @@ func (s *store) putClient(backend, issuer, clientID string) error {
 // A connect link carries a ticket instead of a login: the person opening it in a browser has no token for
 // mcp-fuse, so the ticket - signed, short-lived, naming one person and one backend - is what says who is
 // connecting what.
-type ticket struct {
+// Ticket names one person and one backend. It says whom a link was made for and proves nothing about who opens it.
+type Ticket struct {
 	Person  string `json:"u"`
 	Backend string `json:"b"`
 	Expires int64  `json:"x"`
 }
 
-const ticketTTL = 10 * time.Minute
+// TicketTTL is how long a connect link stays valid.
+const TicketTTL = 10 * time.Minute
 
-func signTicket(secret []byte, t ticket) string {
+func SignTicket(secret []byte, t Ticket) string {
 	payload, _ := json.Marshal(t)
 	body := b64(payload)
 	mac := hmac.New(sha256.New, deriveKey(secret, "ticket"))
@@ -208,27 +223,27 @@ func signTicket(secret []byte, t ticket) string {
 	return body + "." + b64(mac.Sum(nil))
 }
 
-func verifyTicket(secret []byte, token string, now time.Time) (ticket, error) {
+func VerifyTicket(secret []byte, token string, now time.Time) (Ticket, error) {
 	body, sig, ok := strings.Cut(token, ".")
 	if !ok {
-		return ticket{}, errors.New("malformed ticket")
+		return Ticket{}, errors.New("malformed ticket")
 	}
 	mac := hmac.New(sha256.New, deriveKey(secret, "ticket"))
 	mac.Write([]byte(body))
 	want := b64(mac.Sum(nil))
 	if !hmac.Equal([]byte(sig), []byte(want)) {
-		return ticket{}, errors.New("bad ticket signature")
+		return Ticket{}, errors.New("bad ticket signature")
 	}
 	payload, err := unb64(body)
 	if err != nil {
-		return ticket{}, err
+		return Ticket{}, err
 	}
-	var t ticket
+	var t Ticket
 	if err := json.Unmarshal(payload, &t); err != nil {
-		return ticket{}, err
+		return Ticket{}, err
 	}
 	if now.Unix() > t.Expires {
-		return ticket{}, errors.New("ticket expired")
+		return Ticket{}, errors.New("ticket expired")
 	}
 	return t, nil
 }

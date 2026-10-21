@@ -1,4 +1,5 @@
-package main
+// Package config is the JSON file mcp-fuse is started with, and the checks that make a bad one fail at startup.
+package config
 
 import (
 	"bytes"
@@ -19,11 +20,12 @@ type Config struct {
 	Backends             []Backend `json:"backends"`
 	ListTimeoutSeconds   int       `json:"list_timeout_seconds"`
 
-	origin      string // scheme://host of Resource
-	mcpPath     string // path the MCP endpoint is served on, taken from Resource
-	prmPath     string // path of the protected resource metadata document (RFC 9728)
-	prmURL      string // absolute URL of that document, advertised in 401 challenges
-	connectBase string // path prefix of the pages where a person connects a backend
+	// Derived from Resource by Validate.
+	Origin      string `json:"-"` // scheme://host
+	MCPPath     string `json:"-"` // path the MCP endpoint is served on
+	PRMPath     string `json:"-"` // path of the protected resource metadata document (RFC 9728)
+	PRMURL      string `json:"-"` // absolute URL of that document, advertised in 401 challenges
+	ConnectBase string `json:"-"` // path prefix of the pages where a person connects a backend
 }
 
 // Auth says how the token a caller presents to mcp-fuse is checked. That token is for mcp-fuse alone and is
@@ -46,9 +48,11 @@ type Backend struct {
 	ClientSecretFile string `json:"client_secret_file"`
 }
 
-func (b Backend) oauth() bool { return b.Auth != "none" }
+// OAuth says whether each person connects this backend. A backend configured "none" asks for no token.
+func (b Backend) OAuth() bool { return b.Auth != "none" }
 
-func loadConfig(path string) (Config, error) {
+// Load reads and validates the configuration file. An unknown key is an error.
+func Load(path string) (Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return Config{}, err
@@ -59,13 +63,14 @@ func loadConfig(path string) (Config, error) {
 	if err := dec.Decode(&cfg); err != nil {
 		return Config{}, fmt.Errorf("%s: %w", path, err)
 	}
-	if err := cfg.validate(); err != nil {
+	if err := cfg.Validate(); err != nil {
 		return Config{}, fmt.Errorf("%s: %w", path, err)
 	}
 	return cfg, nil
 }
 
-func (c *Config) validate() error {
+// Validate fills in the defaults and the derived fields, and rejects a configuration that cannot work.
+func (c *Config) Validate() error {
 	if c.Listen == "" {
 		c.Listen = "127.0.0.1:8080"
 	}
@@ -80,17 +85,17 @@ func (c *Config) validate() error {
 	if err != nil {
 		return err
 	}
-	c.origin = res.Scheme + "://" + res.Host
-	c.mcpPath = strings.TrimRight(res.Path, "/")
-	if c.mcpPath == "" {
-		c.mcpPath = "/"
+	c.Origin = res.Scheme + "://" + res.Host
+	c.MCPPath = strings.TrimRight(res.Path, "/")
+	if c.MCPPath == "" {
+		c.MCPPath = "/"
 	}
-	c.prmPath = "/.well-known/oauth-protected-resource"
-	if c.mcpPath != "/" {
-		c.prmPath += c.mcpPath
+	c.PRMPath = "/.well-known/oauth-protected-resource"
+	if c.MCPPath != "/" {
+		c.PRMPath += c.MCPPath
 	}
-	c.prmURL = c.origin + c.prmPath
-	c.connectBase = strings.TrimRight(c.mcpPath, "/") + "/connect"
+	c.PRMURL = c.Origin + c.PRMPath
+	c.ConnectBase = strings.TrimRight(c.MCPPath, "/") + "/connect"
 
 	if len(c.AuthorizationServers) == 0 {
 		return fmt.Errorf("authorization_servers must list at least one authorization server")
@@ -128,7 +133,7 @@ func (c *Config) validate() error {
 		if b.ClientSecretFile != "" && b.ClientID == "" {
 			return fmt.Errorf("backends[%s].client_secret_file needs client_id", b.Name)
 		}
-		if b.oauth() {
+		if b.OAuth() {
 			needsGrants = true
 		}
 	}

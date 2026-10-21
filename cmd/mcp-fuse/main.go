@@ -1,3 +1,4 @@
+// Command mcp-fuse presents several MCP servers as one.
 package main
 
 import (
@@ -12,6 +13,11 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/daquv-core/mcp-fuse/internal/config"
+	"github.com/daquv-core/mcp-fuse/internal/front"
+	"github.com/daquv-core/mcp-fuse/internal/fuse"
+	"github.com/daquv-core/mcp-fuse/internal/state"
 )
 
 // Set by build.sh (-ldflags -X main.version=...).
@@ -29,7 +35,7 @@ func main() {
 
 	log := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 
-	cfg, err := loadConfig(*configPath)
+	cfg, err := config.Load(*configPath)
 	if err != nil {
 		log.Error("invalid configuration", "error", err.Error())
 		os.Exit(1)
@@ -45,7 +51,7 @@ func main() {
 
 	srv := &http.Server{
 		Addr:              cfg.Listen,
-		Handler:           newFuse(cfg, log, version, d),
+		Handler:           fuse.New(cfg, log, version, d),
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       120 * time.Second,
 		// No write timeout: a tool call can legitimately run for minutes and its response is streamed.
@@ -68,44 +74,44 @@ func main() {
 }
 
 // buildDeps opens what the configuration points at: the encrypted state and the means of identifying callers.
-func buildDeps(cfg Config) (deps, error) {
-	d := deps{clientSecrets: map[string]string{}}
+func buildDeps(cfg config.Config) (fuse.Deps, error) {
+	d := fuse.Deps{ClientSecrets: map[string]string{}}
 	for _, b := range cfg.Backends {
 		if b.ClientSecretFile != "" {
 			raw, err := os.ReadFile(b.ClientSecretFile)
 			if err != nil {
-				return deps{}, err
+				return fuse.Deps{}, err
 			}
-			d.clientSecrets[b.Name] = strings.TrimSpace(string(raw))
+			d.ClientSecrets[b.Name] = strings.TrimSpace(string(raw))
 		}
 	}
 	for _, b := range cfg.Backends {
-		if b.oauth() {
-			secret, err := readSecret(cfg.SecretFile)
+		if b.OAuth() {
+			secret, err := state.ReadSecret(cfg.SecretFile)
 			if err != nil {
-				return deps{}, err
+				return fuse.Deps{}, err
 			}
-			st, err := openStore(cfg.StateFile, secret)
+			st, err := state.Open(cfg.StateFile, secret)
 			if err != nil {
-				return deps{}, err
+				return fuse.Deps{}, err
 			}
-			d.secret, d.store = secret, st
+			d.Secret, d.Store = secret, st
 			break
 		}
 	}
 	if cfg.Auth.IntrospectionURL == "" {
-		d.auth = anonymous{}
+		d.Auth = front.Anonymous{}
 		return d, nil
 	}
 	clientSecret := ""
 	if cfg.Auth.ClientSecretFile != "" {
 		raw, err := os.ReadFile(cfg.Auth.ClientSecretFile)
 		if err != nil {
-			return deps{}, err
+			return fuse.Deps{}, err
 		}
 		clientSecret = strings.TrimSpace(string(raw))
 	}
-	d.auth = newIntrospector(cfg.Auth.IntrospectionURL, cfg.Auth.ClientID, clientSecret, cfg.Resource)
-	d.frontSecret = clientSecret
+	d.Auth = front.NewIntrospector(cfg.Auth.IntrospectionURL, cfg.Auth.ClientID, clientSecret, cfg.Resource)
+	d.FrontSecret = clientSecret
 	return d, nil
 }

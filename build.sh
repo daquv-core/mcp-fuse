@@ -22,5 +22,5 @@ fi
 go vet ./... || exit 1
 
 # Static, so the box needs no toolchain and no libc match.
-CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o mcp-fuse .
+CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o mcp-fuse ./cmd/mcp-fuse
 echo "built ${VERSION} -> ./mcp-fuse"
