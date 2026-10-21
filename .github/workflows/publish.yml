@@ -21,7 +21,7 @@ permissions:
 
 jobs:
   image:
-    runs-on: [self-hosted, mcp-fuse]
+    runs-on: [self-hosted, slot]
     timeout-minutes: 20
     permissions:
       contents: read

@@ -1,7 +1,7 @@
 name: check
 
 # Every pull request: gofmt, vet, a static build and the tests under the race detector, in the same Go image the
-# release is built with. Pull requests from forks are not run on this repository's self-hosted runner.
+# release is built with. Pull requests from forks are not run on the self-hosted runners.
 
 on:
   pull_request:
@@ -16,7 +16,7 @@ permissions:
 jobs:
   check:
     if: github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: [self-hosted, mcp-fuse]
+    runs-on: [self-hosted, slot]
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4

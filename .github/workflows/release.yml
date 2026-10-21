@@ -20,7 +20,7 @@ permissions:
 
 jobs:
   draft:
-    runs-on: [self-hosted, mcp-fuse]
+    runs-on: [self-hosted, slot]
     timeout-minutes: 10
     permissions:
       contents: write
