@@ -1,4 +1,6 @@
-package main
+// Package front checks the token a caller of mcp-fuse presents. That token is for mcp-fuse alone: it says who the
+// caller is and goes no further.
+package front
 
 import (
 	"context"
@@ -18,23 +20,25 @@ import (
 // it goes no further: no backend ever sees it.
 
 var (
-	errUnauthenticated = errors.New("unauthenticated")
-	errAuthUnavailable = errors.New("authentication unavailable")
+	// ErrUnauthenticated: no token, or one that is not active, not for this server, or names no one.
+	ErrUnauthenticated = errors.New("unauthenticated")
+	// ErrUnavailable: the authorization server could not be asked. This is not the caller's fault.
+	ErrUnavailable = errors.New("authentication unavailable")
 )
 
-// verifier turns the bearer token of a request into a stable key for the person behind it.
-type verifier interface {
-	verify(ctx context.Context, token string) (person string, err error)
+// Verifier turns the bearer token of a request into a stable key for the person behind it.
+type Verifier interface {
+	Verify(ctx context.Context, token string) (person string, err error)
 }
 
-// anonymous is used when no backend needs a person: there is nothing to key and nothing to protect.
-type anonymous struct{}
+// Anonymous is used when no backend needs a person: there is nothing to key and nothing to protect.
+type Anonymous struct{}
 
-func (anonymous) verify(context.Context, string) (string, error) { return "anonymous", nil }
+func (Anonymous) Verify(context.Context, string) (string, error) { return "anonymous", nil }
 
-// introspector asks the authorization server whether a token is live and for whom (RFC 7662). The audience must
+// Introspector asks the authorization server whether a token is live and for whom (RFC 7662). The audience must
 // be this server: a token issued for another resource is not accepted here, whoever issued it.
-type introspector struct {
+type Introspector struct {
 	endpoint, clientID, clientSecret, resource string
 	hc                                         *http.Client
 	now                                        func() time.Time
@@ -53,8 +57,9 @@ const (
 	introspectionCacheMax = 4096
 )
 
-func newIntrospector(endpoint, clientID, clientSecret, resource string) *introspector {
-	return &introspector{
+// NewIntrospector checks tokens at an RFC 7662 endpoint, requiring that `resource` is among their audiences.
+func NewIntrospector(endpoint, clientID, clientSecret, resource string) *Introspector {
+	return &Introspector{
 		endpoint: endpoint, clientID: clientID, clientSecret: clientSecret, resource: resource,
 		hc:    &http.Client{Timeout: 10 * time.Second, Transport: &http.Transport{Proxy: nil}},
 		now:   time.Now,
@@ -62,9 +67,9 @@ func newIntrospector(endpoint, clientID, clientSecret, resource string) *introsp
 	}
 }
 
-func (v *introspector) verify(ctx context.Context, token string) (string, error) {
+func (v *Introspector) Verify(ctx context.Context, token string) (string, error) {
 	if token == "" {
-		return "", errUnauthenticated
+		return "", ErrUnauthenticated
 	}
 	key := sha256.Sum256([]byte(token))
 	v.mu.Lock()
@@ -80,7 +85,7 @@ func (v *introspector) verify(ctx context.Context, token string) (string, error)
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, v.endpoint, strings.NewReader(form.Encode()))
 	if err != nil {
-		return "", errAuthUnavailable
+		return "", ErrUnavailable
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "application/json")
@@ -89,11 +94,11 @@ func (v *introspector) verify(ctx context.Context, token string) (string, error)
 	}
 	resp, err := v.hc.Do(req)
 	if err != nil {
-		return "", errAuthUnavailable
+		return "", ErrUnavailable
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return "", errAuthUnavailable
+		return "", ErrUnavailable
 	}
 	var out struct {
 		Active bool            `json:"active"`
@@ -103,10 +108,10 @@ func (v *introspector) verify(ctx context.Context, token string) (string, error)
 		Exp    int64           `json:"exp"`
 	}
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&out); err != nil {
-		return "", errAuthUnavailable
+		return "", ErrUnavailable
 	}
 	if !out.Active || out.Sub == "" || !audienceIncludes(out.Aud, v.resource) {
-		return "", errUnauthenticated
+		return "", ErrUnauthenticated
 	}
 
 	sum := sha256.Sum256([]byte(out.Iss + "\n" + out.Sub))
@@ -130,12 +135,12 @@ func (v *introspector) verify(ctx context.Context, token string) (string, error)
 func audienceIncludes(raw json.RawMessage, resource string) bool {
 	var one string
 	if json.Unmarshal(raw, &one) == nil {
-		return trimSlash(one) == trimSlash(resource)
+		return strings.TrimRight(one, "/") == strings.TrimRight(resource, "/")
 	}
 	var many []string
 	if json.Unmarshal(raw, &many) == nil {
 		for _, a := range many {
-			if trimSlash(a) == trimSlash(resource) {
+			if strings.TrimRight(a, "/") == strings.TrimRight(resource, "/") {
 				return true
 			}
 		}
@@ -143,7 +148,8 @@ func audienceIncludes(raw json.RawMessage, resource string) bool {
 	return false
 }
 
-func bearerToken(r *http.Request) string {
+// BearerToken returns the token of an `Authorization: Bearer` header, or "".
+func BearerToken(r *http.Request) string {
 	scheme, token, ok := strings.Cut(r.Header.Get("Authorization"), " ")
 	if !ok || !strings.EqualFold(scheme, "Bearer") {
 		return ""

@@ -1,7 +1,8 @@
-package main
+package fuse
 
 import (
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -17,6 +18,11 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/daquv-core/mcp-fuse/internal/config"
+	"github.com/daquv-core/mcp-fuse/internal/front"
+	"github.com/daquv-core/mcp-fuse/internal/jsonrpc"
+	"github.com/daquv-core/mcp-fuse/internal/state"
 )
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -78,7 +84,7 @@ func (as *fakeAS) next(prefix string) string {
 
 func (as *fakeAS) metadata(w http.ResponseWriter, r *http.Request) {
 	u := as.srv.URL
-	writeFrame(w, 200, map[string]any{
+	jsonrpc.WriteFrame(w, 200, map[string]any{
 		"issuer": u, "authorization_endpoint": u + "/authorize", "token_endpoint": u + "/token",
 		"registration_endpoint": u + "/register", "code_challenge_methods_supported": []string{"S256"},
 		"authorization_response_iss_parameter_supported": as.issParam,
@@ -99,7 +105,7 @@ func (as *fakeAS) register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	as.registrations++
-	writeFrame(w, 201, map[string]string{"client_id": as.next("client")})
+	jsonrpc.WriteFrame(w, 201, map[string]string{"client_id": as.next("client")})
 }
 
 func (as *fakeAS) authorize(w http.ResponseWriter, r *http.Request) {
@@ -129,7 +135,7 @@ func (as *fakeAS) token(w http.ResponseWriter, r *http.Request) {
 	as.mu.Lock()
 	defer as.mu.Unlock()
 	_ = r.ParseForm()
-	fail := func(code string) { writeFrame(w, 400, map[string]string{"error": code}) }
+	fail := func(code string) { jsonrpc.WriteFrame(w, 400, map[string]string{"error": code}) }
 	if secret, ok := as.confidential[r.PostForm.Get("client_id")]; ok {
 		got := r.PostForm.Get("client_secret")
 		if !as.secretInBody {
@@ -140,7 +146,7 @@ func (as *fakeAS) token(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if got != secret {
-			writeFrame(w, 401, map[string]string{"error": "invalid_client"})
+			jsonrpc.WriteFrame(w, 401, map[string]string{"error": "invalid_client"})
 			return
 		}
 	}
@@ -149,7 +155,7 @@ func (as *fakeAS) token(w http.ResponseWriter, r *http.Request) {
 		as.tokens[at] = tokRec{aud: resource, sub: sub}
 		as.refreshTokens[rt] = refRec{resource: resource, clientID: clientID, sub: sub}
 		as.lastToken = at
-		writeFrame(w, 200, map[string]any{"access_token": at, "token_type": "Bearer", "refresh_token": rt, "expires_in": as.expiresIn})
+		jsonrpc.WriteFrame(w, 200, map[string]any{"access_token": at, "token_type": "Bearer", "refresh_token": rt, "expires_in": as.expiresIn})
 	}
 	switch r.PostForm.Get("grant_type") {
 	case "authorization_code":
@@ -160,7 +166,7 @@ func (as *fakeAS) token(w http.ResponseWriter, r *http.Request) {
 		}
 		rec.used = true
 		sum := sha256.Sum256([]byte(r.PostForm.Get("code_verifier")))
-		if b64(sum[:]) != rec.challenge || r.PostForm.Get("redirect_uri") != rec.redirect ||
+		if base64.RawURLEncoding.EncodeToString(sum[:]) != rec.challenge || r.PostForm.Get("redirect_uri") != rec.redirect ||
 			r.PostForm.Get("client_id") != rec.clientID || r.PostForm.Get("resource") != rec.resource {
 			fail("invalid_grant")
 			return
@@ -198,10 +204,10 @@ func (as *fakeAS) introspect(w http.ResponseWriter, r *http.Request) {
 		rec, ok = frontRec{sub: t.sub, aud: t.aud}, true
 	}
 	if !ok {
-		writeFrame(w, 200, map[string]any{"active": false})
+		jsonrpc.WriteFrame(w, 200, map[string]any{"active": false})
 		return
 	}
-	writeFrame(w, 200, map[string]any{"active": true, "sub": rec.sub, "iss": as.srv.URL, "aud": rec.aud, "exp": time.Now().Add(10 * time.Minute).Unix()})
+	jsonrpc.WriteFrame(w, 200, map[string]any{"active": true, "sub": rec.sub, "iss": as.srv.URL, "aud": rec.aud, "exp": time.Now().Add(10 * time.Minute).Unix()})
 }
 
 func (as *fakeAS) setLogin(sub string) {
@@ -267,11 +273,11 @@ func (b *fakeMCP) metadataURL() string {
 
 func (b *fakeMCP) handle(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path == "/.well-known/oauth-protected-resource/mcp" && b.as != nil {
-		writeFrame(w, 200, map[string]any{"resource": b.url(), "authorization_servers": []string{b.as.srv.URL}})
+		jsonrpc.WriteFrame(w, 200, map[string]any{"resource": b.url(), "authorization_servers": []string{b.as.srv.URL}})
 		return
 	}
 	body, _ := io.ReadAll(r.Body)
-	var env envelope
+	var env jsonrpc.Envelope
 	_ = json.Unmarshal(body, &env)
 
 	if b.as != nil {
@@ -330,7 +336,7 @@ func (b *fakeMCP) handle(w http.ResponseWriter, r *http.Request) {
 		reply(`{"tools":[` + strings.Join(items, ",") + `]}`)
 	case "tools/call":
 		w.Header().Set("Content-Type", "application/json")
-		io.WriteString(w, b.callReply[paramString(env.Params, "name")])
+		io.WriteString(w, b.callReply[jsonrpc.ParamString(env.Params, "name")])
 	case "prompts/list":
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprintf(w, `{"jsonrpc":"2.0","id":%s,"error":{"code":-32601,"message":"Method not found"}}`, env.ID)
@@ -428,7 +434,7 @@ func newWorld(t *testing.T, open map[int]bool, backends ...*fakeMCP) *world {
 
 // newWorldWith is newWorld with a hook that may change the configuration, the dependencies and the fake
 // authorization server before mcp-fuse starts.
-func newWorldWith(t *testing.T, open map[int]bool, tweak func(*Config, *deps, *fakeAS), backends ...*fakeMCP) *world {
+func newWorldWith(t *testing.T, open map[int]bool, tweak func(*config.Config, *Deps, *fakeAS), backends ...*fakeMCP) *world {
 	t.Helper()
 	as := newAS(t)
 	w := &world{t: t, as: as, backends: backends, logs: &logBuffer{}, secret: testSecret}
@@ -437,9 +443,9 @@ func newWorldWith(t *testing.T, open map[int]bool, tweak func(*Config, *deps, *f
 	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) { f.ServeHTTP(rw, r) }))
 	resource := "http://" + srv.Listener.Addr().String() + "/mcp"
 
-	cfg := Config{Resource: resource, AuthorizationServers: []string{as.srv.URL}}
+	cfg := config.Config{Resource: resource, AuthorizationServers: []string{as.srv.URL}}
 	for i, b := range backends {
-		bk := Backend{Name: fmt.Sprintf("b%d", i), URL: b.url(), Auth: "oauth"}
+		bk := config.Backend{Name: fmt.Sprintf("b%d", i), URL: b.url(), Auth: "oauth"}
 		if open[i] {
 			bk.Auth = "none"
 		} else {
@@ -449,24 +455,24 @@ func newWorldWith(t *testing.T, open map[int]bool, tweak func(*Config, *deps, *f
 	}
 	w.statePath = filepath.Join(t.TempDir(), "state.bin")
 	cfg.StateFile, cfg.SecretFile = w.statePath, "unused-in-tests"
-	cfg.Auth = Auth{IntrospectionURL: as.srv.URL + "/introspect", ClientID: "fuse"}
-	if err := cfg.validate(); err != nil {
+	cfg.Auth = config.Auth{IntrospectionURL: as.srv.URL + "/introspect", ClientID: "fuse"}
+	if err := cfg.Validate(); err != nil {
 		t.Fatal(err)
 	}
 
-	st, err := openStore(w.statePath, w.secret)
+	st, err := state.Open(w.statePath, w.secret)
 	if err != nil {
 		t.Fatal(err)
 	}
-	d := deps{store: st, secret: w.secret, auth: newIntrospector(as.srv.URL+"/introspect", "fuse", "s3cret", resource),
-		clientSecrets: map[string]string{}, frontSecret: "s3cret"}
+	d := Deps{Store: st, Secret: w.secret, Auth: front.NewIntrospector(as.srv.URL+"/introspect", "fuse", "s3cret", resource),
+		ClientSecrets: map[string]string{}, FrontSecret: "s3cret"}
 	if tweak != nil {
 		tweak(&cfg, &d, as)
-		if err := cfg.validate(); err != nil {
+		if err := cfg.Validate(); err != nil {
 			t.Fatal(err)
 		}
 	}
-	f = newFuse(cfg, slog.New(slog.NewJSONHandler(w.logs, nil)), "test", d)
+	f = New(cfg, slog.New(slog.NewJSONHandler(w.logs, nil)), "test", d)
 	srv.Start()
 	t.Cleanup(srv.Close)
 	w.srv, w.f = srv, f
@@ -545,7 +551,7 @@ func (w *world) connect(person, token, backend string) {
 
 func resultOf(t *testing.T, data []byte) map[string]json.RawMessage {
 	t.Helper()
-	var env envelope
+	var env jsonrpc.Envelope
 	if err := json.Unmarshal(data, &env); err != nil {
 		t.Fatalf("not JSON: %s", data)
 	}
