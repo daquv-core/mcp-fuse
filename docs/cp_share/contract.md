@@ -1,6 +1,6 @@
 # The mcp-fuse <-> control-plane contract
 
-> Self-contained. Values that are not settled are marked `(pending)`.
+> Self-contained. It does not point at documents in other repositories.
 
 ## 1. Layout
 
@@ -92,13 +92,11 @@ location /.well-known/oauth-protected-resource {
   is not meant to run.
 - **Handover is a version string:** CP pins a `<sha>` and installs that binary. `mcp-fuse -version` prints it.
 - Needs: a self-hosted runner labelled `mcp-fuse` for the workflow, and pull access to the package for CP.
-  `(pending - to be requested from CP)`
 
 ## 7. Prerequisites outside this repository
 
 - The authorization server that callers log in at must issue tokens whose audience is mcp-fuse's `resource` and
-  offer an introspection endpoint. QUVI's authorization server accepts only its own surface addresses as a
-  resource today and has no introspection endpoint. `(pending - change in QUVI)`
+  offer an introspection endpoint (RFC 7662) to the client named in `auth`.
 - Each backend's authorization server must accept mcp-fuse as a client (§4). Nothing changes in the backend.
 
 ## 8. Non-goals

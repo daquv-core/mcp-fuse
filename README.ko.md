@@ -4,8 +4,6 @@
 
 여러 MCP 서버를 하나의 MCP 서버처럼 보이게 하는 중계 서버입니다.
 
-> **상태: 첫 구현이며 아직 릴리스가 없습니다.** MCP 규격 2025-11-25 이전을 지원합니다([프로토콜](#프로토콜) 참고).
->
 > 이 문서는 [`README.md`](README.md)(영문)를 따릅니다. 내용이 다르면 영문이 기준입니다.
 
 ## 하는 일
@@ -133,7 +131,7 @@ backend의 인가 서버에 등록할 redirect URI는 `<resource의 origin><reso
 
 - **지원:** Streamable HTTP 위의 2025-11-25 이전 개정: `initialize` 핸드셰이크, 선택적 `Mcp-Session-Id`, JSON 또는
   이벤트 스트림 응답. 2025-06-18과 같이 batch는 거절합니다.
-- **아직 없음:** 핸드셰이크와 세션을 없앤 2026-07-28 개정. `MCP-Protocol-Version: 2026-07-28` 이상을 단 요청에는
+- **미지원:** 핸드셰이크와 세션을 없앤 2026-07-28 개정. `MCP-Protocol-Version: 2026-07-28` 이상을 단 요청에는
   `400`으로 답하며, 두 개정을 모두 지원하는 클라이언트는 이를 `initialize`로 되돌아가라는 신호로 받아들입니다.
 - **제공하지 않음:** 상시 `GET` 이벤트 스트림, 서버→클라이언트 요청(sampling, elicitation). 그래서 연결 링크는 URL
   방식 elicitation이 아니라 instructions로 전달합니다. resource template은 합치지 않습니다.

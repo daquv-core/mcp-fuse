@@ -4,9 +4,6 @@
 
 A reverse proxy that presents several MCP servers as one.
 
-> **Status: first implementation, not released.** It speaks MCP up to revision 2025-11-25 (see
-> [Protocol](#protocol)).
-
 ## What it does
 
 An AI agent (ChatGPT, Gemini, Claude, or an in-house assistant) connects to **one** MCP endpoint. `mcp-fuse`
@@ -131,7 +128,7 @@ Behavior follows the [MCP specification](https://modelcontextprotocol.io/specifi
 
 - **Supported:** revisions up to 2025-11-25 over Streamable HTTP: the `initialize` handshake, the optional
   `Mcp-Session-Id`, replies as JSON or as an event stream. Batches are refused, as in 2025-06-18.
-- **Not yet:** revision 2026-07-28, which drops the handshake and sessions. A request carrying
+- **Not supported:** revision 2026-07-28, which drops the handshake and sessions. A request carrying
   `MCP-Protocol-Version: 2026-07-28` or later is answered `400`, which a client that supports both revisions takes
   as the cue to fall back to `initialize`.
 - **Not offered:** the standing `GET` event stream and server-to-client requests (sampling, elicitation), so

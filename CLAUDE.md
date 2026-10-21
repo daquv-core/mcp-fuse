@@ -40,3 +40,5 @@ one state file, one instance. Built and published by CI on every push to main; d
 - `docs/cp_share/` - the contract with control-plane. Self-contained: it never points at a document that lives in
   another repository.
 - Never write the same fact in two places.
+- Documents state what is true whatever the release: no "first implementation", "not released", "not yet" or
+  "pending" notes. What is unsupported is listed as unsupported; what is open belongs in an issue.
