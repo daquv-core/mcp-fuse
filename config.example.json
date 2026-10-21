@@ -1,0 +1,9 @@
+{
+  "listen": "127.0.0.1:8080",
+  "resource": "https://mcp.example.com/mcp",
+  "authorization_servers": ["https://auth.example.com"],
+  "backends": [
+    {"name": "quvi", "url": "http://127.0.0.1:8081/v3/mcp/nl2sql", "stateful": true},
+    {"name": "exec", "url": "http://127.0.0.1:9000/mcp"}
+  ]
+}
