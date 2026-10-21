@@ -35,6 +35,18 @@ backend は人ごとに 1 回接続します。
 フロー全体は、リンクを開いたブラウザーで完了させる必要があります。[authorization](docs/authorization.md)（英語）を
 参照してください。
 
+## 自分の MCP サーバーを追加する
+
+サーバーを mcp-fuse のために変更する必要はありません。[MCP 仕様](https://modelcontextprotocol.io/specification/latest)に
+従って作ってください。Streamable HTTP と、[認可仕様](https://modelcontextprotocol.io/specification/latest/basic/authorization)
+（保護リソースメタデータ、PKCE に対応した認可サーバー、サーバー自身を audience とするトークン）です。その上で:
+
+1. サーバーの認可サーバーに mcp-fuse を OAuth クライアントとして知らせます（または動的クライアント登録を有効にします）。
+2. `backends` に `{"name": "orders", "url": "https://orders.example.com/mcp"}` を追加して再起動します。
+
+人ごとにリンクから 1 回接続すると、そのサーバーのツールが他のサーバーのツールと統合されて、その人の一覧に現れます。
+必要なことと、追加する前にサーバーを確認する方法は [Adding your MCP server](docs/backends.md)（英語）にあります。
+
 ## しないこと
 
 以下は対象外であり、今後も変わりません。必要な場合は backend 側で対応します。
@@ -76,6 +88,7 @@ mcp-fuse を登録します（[authorization](docs/authorization.md)）。**イ�
 
 `docs/` 以下のドキュメントは英語です。
 
+- [Adding your MCP server](docs/backends.md) — 何を作り、何を登録し、何を追加するか。
 - [Configuration](docs/configuration.md) — すべての設定キー。
 - [Authorization](docs/authorization.md) — 何をどこに登録するか、backend をどう接続するか。
 - [Deployment](docs/deployment.md) — ビルド、ファイル、リバースプロキシ、運用。

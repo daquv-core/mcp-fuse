@@ -34,6 +34,19 @@ backend는 사람마다 한 번 연결합니다.
 
 전 과정은 링크를 연 브라우저에서 끝내야 합니다. [authorization](docs/authorization.md)(영문)을 보세요.
 
+## 내 MCP 서버 추가하기
+
+서버를 mcp-fuse 때문에 바꿀 필요는 없습니다. [MCP 규격](https://modelcontextprotocol.io/specification/latest)대로 만드세요.
+Streamable HTTP와 [인가 규격](https://modelcontextprotocol.io/specification/latest/basic/authorization)(보호 자원
+메타데이터, PKCE를 지원하는 인가 서버, 서버 자신을 audience로 한 token)입니다. 그다음:
+
+1. 서버의 인가 서버에 mcp-fuse를 OAuth client로 알립니다(또는 동적 client 등록을 켭니다).
+2. `backends`에 `{"name": "orders", "url": "https://orders.example.com/mcp"}`를 추가하고 재기동합니다.
+
+사람마다 링크로 한 번 연결하면, 그 서버의 도구가 다른 서버의 도구와 합쳐져 그 사람의 목록에 나타납니다.
+[Adding your MCP server](docs/backends.md)(영문)에 무엇이 필요한지와 추가하기 전에 서버를 점검하는 방법이
+있습니다.
+
 ## 하지 않는 것
 
 아래는 이 서버의 범위가 아니며 앞으로도 그렇습니다. 필요하면 backend 쪽에서 처리합니다.
@@ -75,6 +88,7 @@ cp examples/config.json config.json          # 편집
 
 `docs/` 아래 문서는 영문입니다.
 
+- [Adding your MCP server](docs/backends.md) — 무엇을 만들고, 무엇을 등록하고, 무엇을 추가하는지.
 - [Configuration](docs/configuration.md) — 모든 설정 키.
 - [Authorization](docs/authorization.md) — 무엇을 어디에 등록하는지, backend를 어떻게 연결하는지.
 - [Deployment](docs/deployment.md) — 빌드, 파일, 리버스 프록시, 운영.
