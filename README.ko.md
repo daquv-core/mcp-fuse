@@ -32,7 +32,7 @@ backend는 사람마다 한 번 연결합니다.
 3. 이어서 그 backend의 인가 서버로 가서 거기서 로그인합니다.
 4. mcp-fuse는 그 사람과 그 backend의 token을 암호화해 보관합니다.
 
-전 과정은 링크를 연 브라우저에서 끝내야 합니다. [authorization](docs/authorization.md)(영문)을 보세요.
+전 과정은 링크를 연 브라우저에서 끝내야 합니다. [authorization](docs/authorization.ko.md)을 보세요.
 
 ## 내 MCP 서버 추가하기
 
@@ -44,7 +44,7 @@ Streamable HTTP와 [인가 규격](https://modelcontextprotocol.io/specification
 2. `backends`에 `{"name": "orders", "url": "https://orders.example.com/mcp"}`를 추가하고 재기동합니다.
 
 사람마다 링크로 한 번 연결하면, 그 서버의 도구가 다른 서버의 도구와 합쳐져 그 사람의 목록에 나타납니다.
-[Adding your MCP server](docs/backends.md)(영문)에 무엇이 필요한지와 추가하기 전에 서버를 점검하는 방법이
+[Adding your MCP server](docs/backends.ko.md)에 무엇이 필요한지와 추가하기 전에 서버를 점검하는 방법이
 있습니다.
 
 ## 하지 않는 것
@@ -64,7 +64,7 @@ cp examples/config.json config.json          # 편집
 ./mcp-fuse -config config.json
 ```
 
-또는 [release](docs/deployment.md#releases)의 바이너리(`mcp-fuse-linux-amd64`, `SHA256SUMS` 포함)를 받아 씁니다.
+또는 [release](docs/deployment.ko.md#릴리스)의 바이너리(`mcp-fuse-linux-amd64`, `SHA256SUMS` 포함)를 받아 씁니다.
 
 최소 설정:
 
@@ -83,19 +83,19 @@ cp examples/config.json config.json          # 편집
 ```
 
 앞단에 TLS를 종료하는 리버스 프록시([`examples/nginx.conf`](examples/nginx.conf))를 두고, 인가 서버들에 mcp-fuse를
-등록합니다([authorization](docs/authorization.md)). **인스턴스는 하나만** 실행합니다. 컨테이너 이미지는
+등록합니다([authorization](docs/authorization.ko.md)). **인스턴스는 하나만** 실행합니다. 컨테이너 이미지는
 `docker build -t mcp-fuse .`로 만듭니다.
 
 ## 문서
 
-`docs/` 아래 문서는 영문입니다.
+`docs/` 아래 문서는 영문이 원본이고, 각각 `*.ko.md`와 `*.ja.md`가 따릅니다.
 
-- [Adding your MCP server](docs/backends.md) — 무엇을 만들고, 무엇을 등록하고, 무엇을 추가하는지.
-- [Configuration](docs/configuration.md) — 모든 설정 키.
-- [Authorization](docs/authorization.md) — 무엇을 어디에 등록하는지, backend를 어떻게 연결하는지.
-- [Deployment](docs/deployment.md) — 빌드, 파일, 리버스 프록시, 운영.
-- [Security model](docs/security.md) — 보장하는 것과 사용자에게 남기는 것.
-- [Protocol](docs/protocol.md) — 처리하는 것, 지원하는 MCP 개정, 오류.
+- [Adding your MCP server](docs/backends.ko.md) — 무엇을 만들고, 무엇을 등록하고, 무엇을 추가하는지.
+- [Configuration](docs/configuration.ko.md) — 모든 설정 키.
+- [Authorization](docs/authorization.ko.md) — 무엇을 어디에 등록하는지, backend를 어떻게 연결하는지.
+- [Deployment](docs/deployment.ko.md) — 빌드, 파일, 리버스 프록시, 운영.
+- [Security model](docs/security.ko.md) — 보장하는 것과 사용자에게 남기는 것.
+- [Protocol](docs/protocol.ko.md) — 처리하는 것, 지원하는 MCP 개정, 오류.
 - [Contributing](CONTRIBUTING.md), [취약점 제보](SECURITY.md).
 
 ## 라이선스
@@ -104,5 +104,5 @@ Apache License 2.0입니다. [LICENSE](LICENSE)를 보세요.
 
 ## 번역
 
-[`README.md`](README.md)(영문)가 원본이고, 이 문서와 [`README.ja.md`](README.ja.md)가 따릅니다. 원본이 바뀌면 세
-파일을 함께 고칩니다.
+[`README.md`](README.md)(영문)가 원본이고, 이 문서와 [`README.ja.md`](README.ja.md)가 따릅니다. `docs/` 아래 문서도
+영문이 원본이고 `docs/<name>.ko.md`와 `docs/<name>.ja.md`가 따릅니다. 영문 파일이 바뀌면 그 번역 둘을 함께 고칩니다.

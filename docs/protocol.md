@@ -1,5 +1,7 @@
 # Protocol
 
+**English** | [한국어](protocol.ko.md) | [日本語](protocol.ja.md)
+
 mcp-fuse speaks MCP over Streamable HTTP and follows the
 [MCP specification](https://modelcontextprotocol.io/specification/latest).
 
