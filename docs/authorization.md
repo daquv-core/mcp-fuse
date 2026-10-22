@@ -30,6 +30,57 @@ It must:
 
 The person's identity inside mcp-fuse is a hash of the introspected `iss` and `sub`.
 
+#### How an agent identifies itself there
+
+An agent is an OAuth client of this server, and it identifies itself before anyone signs in. The
+[MCP authorization specification](https://modelcontextprotocol.io/specification/latest/basic/authorization/client-registration)
+puts the ways in order: a client registered in advance, then a **client ID metadata document**, then
+[dynamic client registration](https://www.rfc-editor.org/rfc/rfc7591) as a fallback for servers that support neither.
+
+A client ID metadata document is a JSON document that the agent's maker publishes at an HTTPS URL, and that URL is the
+agent's `client_id`. It holds the agent's name and redirect URIs. Given such a `client_id`, the authorization server
+fetches the document, checks that the `client_id` inside it is the URL it was fetched from, and sends the person back only
+to the redirect URIs it lists. That is why it comes before dynamic registration:
+
+- **Nothing is registered per connection.** An agent meets servers it has never seen. With dynamic registration each
+  install registers a new client at each server, and nothing tells the server which of them it can remove. A document is
+  one identity per agent, the same at every server.
+- **The domain is the identity.** The redirect URIs come from a document on the maker's domain, not from whoever sends the
+  request, so an administrator allows an agent by that domain.
+- **The maker keeps it current.** A change to the agent's redirect URIs or name is made once, in the document, and each
+  server reads it again when its copy expires.
+
+What it asks of the authorization server is outbound HTTPS to the hosts it accepts documents from. A server that cannot
+reach them, on an isolated network, registers agents in advance or by dynamic registration instead. A server that accepts
+documents says so with `client_id_metadata_document_supported` in its metadata, and agents look for it.
+
+#### With Keycloak
+
+Keycloak accepts client ID metadata documents; its
+[MCP guide](https://www.keycloak.org/securing-apps/mcp-authz-server) has the steps and the settings for particular agents.
+In outline:
+
+1. **Turn the feature on** with `--features=cimd` at startup. The guide states its support level; a feature Keycloak marks
+   experimental may change in any release, so try an agent's sign-in again after each upgrade. With the feature on, the
+   server's metadata has `client_id_metadata_document_supported`.
+2. **A client profile** (*Realm settings* → *Client policies* → *Profiles*) with the `client-id-metadata-document`
+   executor. *Trusted domains*: the hosts of the documents you accept and of the addresses inside them (redirect URIs,
+   logo). *Allow http scheme*: off. *Only Allow Confidential Client*: off, since desktop agents are public clients.
+   *Restrict same domain*: off for an agent that redirects to its own computer (`localhost`), on for one whose redirect
+   URIs are on its maker's domain.
+3. **A client policy** (*Client policies* → *Policies*) with the `client-id-uri` condition: scheme `https`, *Trusted
+   domains* the hosts of the `client_id` URLs. Associate it with the profile above. Agents whose `client_id` URLs share a
+   domain match each other's policy, so allow them with one policy and one profile whose settings satisfy all of them.
+4. **Let Keycloak reach those hosts** over HTTPS, through your proxy if outbound traffic goes through one.
+5. **Put mcp-fuse's `resource` in the audience.** Keycloak creates a client from each document and gives it the realm's
+   default client scopes, so an *Audience* mapper for mcp-fuse's `resource` on a realm default client scope reaches these
+   agents. A document that lists `scope` gets only the basic scope by default instead; for such an agent the audience
+   has to come from the `resource` parameter, which Keycloak acts on with its `resource-indicators` feature. Decode a
+   token an agent receives and read `aud`.
+
+Keycloak keeps one client per document URL and refreshes it from the document, so clients do not pile up per
+connection.
+
 ### 2. Each backend's authorization server
 
 mcp-fuse must be known to it as an OAuth client with:

@@ -63,6 +63,9 @@ backend; mcp-fuse still obtains a separate token for each backend ([authorizatio
 is that, if the server keeps a sign-in session for the browser, the person is not asked to sign in again when they
 connect the backend. What they are shown beyond that is up to the server's consent settings.
 
+If agents log in at your Keycloak, let them identify themselves with client ID metadata documents
+([authorization](authorization.md#with-keycloak)).
+
 ### Two things a ready-made server does not make obvious
 
 What the authorization server must publish and accept is in section 1 (metadata, PKCE `S256`, the `resource` parameter,

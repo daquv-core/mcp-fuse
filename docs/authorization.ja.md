@@ -30,6 +30,59 @@ mcp-fuse は 2 つの役割を同時に担い、その 2 つを混ぜません�
 
 mcp-fuse 内部での本人の ID は、introspection で得た `iss` と `sub` のハッシュです。
 
+#### エージェントがそのサーバーに自分を知らせる方法
+
+エージェントはこの認可サーバーの OAuth クライアントであり、誰かがサインインする前に自分を知らせます。
+[MCP 認可仕様](https://modelcontextprotocol.io/specification/latest/basic/authorization/client-registration)はその方法に
+順序を定めています。事前に登録されたクライアント、次に **client ID metadata document**、そしてどちらにも対応しない
+サーバーのための代替手段として[動的クライアント登録](https://www.rfc-editor.org/rfc/rfc7591)です。
+
+client ID metadata document は、エージェントの提供元が HTTPS の URL に公開する JSON ドキュメントで、その URL が
+エージェントの `client_id` です。ドキュメントにはエージェントの名前とリダイレクト URI があります。このような
+`client_id` を受け取った認可サーバーはドキュメントを取得し、その中の `client_id` が取得元の URL と同じであることを
+確かめ、人をドキュメントに書かれたリダイレクト URI にだけ戻します。これが動的登録より先に来る理由です。
+
+- **接続ごとに登録しません。** エージェントは初めてのサーバーに次々と出会います。動的登録では、インストールごと、
+  サーバーごとに新しいクライアントが登録され、サーバーはそのどれを削除してよいか分かりません。ドキュメントは
+  エージェントごとに 1 つの ID で、どのサーバーでも同じです。
+- **ドメインが ID です。** リダイレクト URI はリクエストの送り手ではなく提供元のドメインにあるドキュメントから
+  来るので、管理者はそのドメインでエージェントを許可します。
+- **提供元が最新に保ちます。** エージェントのリダイレクト URI や名前の変更はドキュメント 1 か所で行われ、各サーバーは
+  手元の写しが期限切れになると読み直します。
+
+認可サーバーに求められるのは、ドキュメントを受け付けるホストへの外向きの HTTPS です。隔離されたネットワークにあって
+そのホストに届かないサーバーは、エージェントを事前に登録するか動的登録を使います。ドキュメントを受け付けるサーバーは
+メタデータの `client_id_metadata_document_supported` でそれを知らせ、エージェントはその値を見ます。
+
+#### Keycloak の場合
+
+Keycloak は client ID metadata document を受け付けます。
+[Keycloak の MCP ガイド](https://www.keycloak.org/securing-apps/mcp-authz-server)に手順とエージェントごとの設定があります。
+概要は次のとおりです。
+
+1. **機能を有効にします。** 起動時に `--features=cimd` を指定します。サポートレベルはガイドに書かれています。
+   Keycloak が実験的とする機能はどのリリースでも変わりうるので、アップグレードのたびにエージェントのサインインを
+   試し直してください。機能を有効にすると、サーバーのメタデータに `client_id_metadata_document_supported` が載ります。
+2. **クライアントプロファイル**（*Realm settings* → *Client policies* → *Profiles*）に `client-id-metadata-document`
+   エグゼキューターを追加します。*Trusted domains*：受け付けるドキュメントのホストと、ドキュメント内のアドレス
+   （リダイレクト URI、ロゴ）のホスト。*Allow http scheme*：オフ。*Only Allow Confidential Client*：オフ。デスクトップの
+   エージェントは public クライアントです。*Restrict same domain*：自分のコンピューター（`localhost`）に戻る
+   エージェントではオフ、リダイレクト URI が提供元のドメインにあるエージェントではオン。
+3. **クライアントポリシー**（*Client policies* → *Policies*）に `client-id-uri` 条件を追加します。scheme は `https`、
+   *Trusted domains* は `client_id` URL のホストです。上のプロファイルと関連付けます。`client_id` URL のドメインが同じ
+   エージェントは互いのポリシーに当てはまるので、1 つのポリシーと、すべてを満たす設定の 1 つのプロファイルで許可して
+   ください。
+4. **Keycloak がそのホストに HTTPS で届くようにします。** 外向きの通信がプロキシを通るなら、そのプロキシ経由です。
+5. **audience に mcp-fuse の `resource` を入れます。** Keycloak はドキュメントごとにクライアントを作り、レルムの
+   デフォルトのクライアントスコープを付けるので、レルムのデフォルトのクライアントスコープに mcp-fuse の `resource` を
+   入れる *Audience* マッパーを置けば、これらのエージェントにも適用されます。ドキュメントに `scope` があると、既定では
+   basic スコープだけが付きます。そのようなエージェントの audience は `resource` パラメーターから来る必要があり、
+   Keycloak は `resource-indicators` 機能でそれを扱います。エージェントが受け取ったトークンをデコードして `aud` を
+   読んでください。
+
+Keycloak はドキュメントの URL ごとにクライアントを 1 つだけ持ち、ドキュメントから更新するので、接続ごとにクライアントが
+増えることはありません。
+
 ### 2. 各 backend の認可サーバー
 
 その認可サーバーに、mcp-fuse が次の条件の OAuth クライアントとして登録されている必要があります。
