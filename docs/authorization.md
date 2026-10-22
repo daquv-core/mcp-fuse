@@ -1,5 +1,7 @@
 # Authorization
 
+**English** | [한국어](authorization.ko.md) | [日本語](authorization.ja.md)
+
 mcp-fuse is two things at once, and keeps them apart.
 
 - To an **agent** it is an ordinary MCP resource server. The agent logs in at an authorization server that

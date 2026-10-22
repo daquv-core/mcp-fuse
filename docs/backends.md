@@ -1,5 +1,7 @@
 # Adding your MCP server
 
+**English** | [한국어](backends.ko.md) | [日本語](backends.ja.md)
+
 You have an MCP server — an application's actions, a data-query server, a tool server — and want it to appear
 behind a single endpoint together with others. **You do not change it for mcp-fuse.** Build it to the MCP standard,
 let mcp-fuse be known to its authorization server, and add it to mcp-fuse's configuration.

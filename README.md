@@ -100,5 +100,5 @@ Apache License 2.0. See [LICENSE](LICENSE).
 
 ## Translations
 
-[`README.ko.md`](README.ko.md) and [`README.ja.md`](README.ja.md) follow this file. When this file changes, change
-all three. The documents under `docs/` are in English.
+[`README.ko.md`](README.ko.md) and [`README.ja.md`](README.ja.md) follow this file, and each document under `docs/`
+is followed by `docs/<name>.ko.md` and `docs/<name>.ja.md`. When an English file changes, change its two translations.
