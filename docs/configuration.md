@@ -1,5 +1,7 @@
 # Configuration
 
+**English** | [한국어](configuration.ko.md) | [日本語](configuration.ja.md)
+
 mcp-fuse reads one JSON file, given with `-config` (default `config.json`). A change takes effect on restart. An
 unknown key is an error, so a misspelled option cannot silently fall back to a default; the process exits non-zero
 and says what is wrong.

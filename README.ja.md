@@ -32,7 +32,7 @@ backend は人ごとに 1 回接続します。
 3. 続いてその backend の認可サーバーに移り、そこでログインします。
 4. mcp-fuse がその人とその backend のトークンを暗号化して保管します。
 
-フロー全体は、リンクを開いたブラウザーで完了させる必要があります。[authorization](docs/authorization.md)（英語）を
+フロー全体は、リンクを開いたブラウザーで完了させる必要があります。[authorization](docs/authorization.ja.md)を
 参照してください。
 
 ## 自分の MCP サーバーを追加する
@@ -45,7 +45,7 @@ backend は人ごとに 1 回接続します。
 2. `backends` に `{"name": "orders", "url": "https://orders.example.com/mcp"}` を追加して再起動します。
 
 人ごとにリンクから 1 回接続すると、そのサーバーのツールが他のサーバーのツールと統合されて、その人の一覧に現れます。
-必要なことと、追加する前にサーバーを確認する方法は [Adding your MCP server](docs/backends.md)（英語）にあります。
+必要なことと、追加する前にサーバーを確認する方法は [Adding your MCP server](docs/backends.ja.md)にあります。
 
 ## しないこと
 
@@ -64,7 +64,7 @@ cp examples/config.json config.json          # 編集する
 ./mcp-fuse -config config.json
 ```
 
-または [release](docs/deployment.md#releases) のバイナリ（`mcp-fuse-linux-amd64`、`SHA256SUMS` 付き）を使います。
+または [release](docs/deployment.ja.md#リリース) のバイナリ（`mcp-fuse-linux-amd64`、`SHA256SUMS` 付き）を使います。
 
 最小の設定:
 
@@ -83,19 +83,19 @@ cp examples/config.json config.json          # 編集する
 ```
 
 手前に TLS を終端するリバースプロキシ（[`examples/nginx.conf`](examples/nginx.conf)）を置き、認可サーバーに
-mcp-fuse を登録します（[authorization](docs/authorization.md)）。**インスタンスは 1 つだけ**実行してください。
+mcp-fuse を登録します（[authorization](docs/authorization.ja.md)）。**インスタンスは 1 つだけ**実行してください。
 コンテナイメージは `docker build -t mcp-fuse .` で作れます。
 
 ## ドキュメント
 
-`docs/` 以下のドキュメントは英語です。
+`docs/` 以下のドキュメントは英語が原本で、それぞれ `*.ko.md` と `*.ja.md` がそれに従います。
 
-- [Adding your MCP server](docs/backends.md) — 何を作り、何を登録し、何を追加するか。
-- [Configuration](docs/configuration.md) — すべての設定キー。
-- [Authorization](docs/authorization.md) — 何をどこに登録するか、backend をどう接続するか。
-- [Deployment](docs/deployment.md) — ビルド、ファイル、リバースプロキシ、運用。
-- [Security model](docs/security.md) — 保証すること、利用者に任せること。
-- [Protocol](docs/protocol.md) — 扱うもの、対応する MCP リビジョン、エラー。
+- [Adding your MCP server](docs/backends.ja.md) — 何を作り、何を登録し、何を追加するか。
+- [Configuration](docs/configuration.ja.md) — すべての設定キー。
+- [Authorization](docs/authorization.ja.md) — 何をどこに登録するか、backend をどう接続するか。
+- [Deployment](docs/deployment.ja.md) — ビルド、ファイル、リバースプロキシ、運用。
+- [Security model](docs/security.ja.md) — 保証すること、利用者に任せること。
+- [Protocol](docs/protocol.ja.md) — 扱うもの、対応する MCP リビジョン、エラー。
 - [Contributing](CONTRIBUTING.md)、[脆弱性の報告](SECURITY.md)。
 
 ## ライセンス
@@ -104,5 +104,6 @@ Apache License 2.0 です。[LICENSE](LICENSE) を参照してください。
 
 ## 翻訳
 
-[`README.md`](README.md)（英語）が原本で、このファイルと [`README.ko.md`](README.ko.md) がそれに従います。原本を
-変更するときは 3 つのファイルを一緒に直します。
+[`README.md`](README.md)（英語）が原本で、このファイルと [`README.ko.md`](README.ko.md) がそれに従います。`docs/` 以下の
+ドキュメントも英語が原本で、`docs/<name>.ko.md` と `docs/<name>.ja.md` がそれに従います。英語のファイルを変更するときは、
+その 2 つの翻訳を一緒に直します。

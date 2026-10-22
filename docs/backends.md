@@ -1,5 +1,7 @@
 # Adding your MCP server
 
+**English** | [한국어](backends.ko.md) | [日本語](backends.ja.md)
+
 You have an MCP server — an application's actions, a data-query server, a tool server — and want it to appear
 behind a single endpoint together with others. **You do not change it for mcp-fuse.** Build it to the MCP standard,
 let mcp-fuse be known to its authorization server, and add it to mcp-fuse's configuration.
@@ -124,6 +126,10 @@ mcp-fuse is an OAuth client of your authorization server. Either
 - register a client by hand: authorization code grant with PKCE and refresh tokens, redirect URI
   `<mcp-fuse resource origin><resource path>/connect/callback` (for `https://mcp.example.com/mcp` that is
   `https://mcp.example.com/mcp/connect/callback`). If the client is confidential, give mcp-fuse its secret in a file.
+
+mcp-fuse does not use [client ID metadata documents](https://modelcontextprotocol.io/specification/latest/basic/authorization/client-registration),
+which the specification prefers to dynamic registration. If your authorization server supports only those, register the
+client by hand ([authorization](authorization.md)).
 
 ## 3. Add it to mcp-fuse
 

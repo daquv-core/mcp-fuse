@@ -32,11 +32,12 @@ way, from `internal/fuse` to the other packages.
 - **Tests.** The invariants listed in [CLAUDE.md](CLAUDE.md) are each held by a test that fails when the behaviour is
   removed; keep it that way. Break your own change on purpose and check a test notices. A test that passes for a
   reason other than the one it names is worse than none.
-- **Documentation** in step with the code. `README.md` is the source for `README.ko.md` and `README.ja.md`; change
-  all three together. The documents under `docs/` are in English and state what is true whatever the release — no
-  "not yet" or "coming soon".
+- **Documentation** in step with the code. Each English file is the source for its translations — `README.md` for
+  `README.ko.md` and `README.ja.md`, and `docs/<name>.md` for `docs/<name>.ko.md` and `docs/<name>.ja.md` — and a change
+  to it changes its two translations in the same pull request. The documents state what is true whatever the release —
+  no "not yet" or "coming soon".
 - **English text.** Commit messages, pull request titles and descriptions, and issues are in English. (The Korean and
-  Japanese READMEs are translations of the English one, nothing more.)
+  Japanese documents are translations of the English ones, nothing more.)
 - **A small diff.** Keep a change to one thing.
 
 ## License

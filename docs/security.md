@@ -1,5 +1,7 @@
 # Security model
 
+**English** | [한국어](security.ko.md) | [日本語](security.ja.md)
+
 mcp-fuse sits between an agent and the systems that hold your data, so what it does with credentials and with
 bodies matters more than what it does with tools. This page lists what it guarantees, why, and what it leaves to
 you. To report a vulnerability, see [SECURITY.md](../SECURITY.md).

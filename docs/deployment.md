@@ -1,5 +1,7 @@
 # Deployment
 
+**English** | [한국어](deployment.ko.md) | [日本語](deployment.ja.md)
+
 mcp-fuse is one static binary (or one container), one JSON file, one state file. It needs no database. Run **one
 instance**.
 

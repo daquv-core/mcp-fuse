@@ -1,5 +1,7 @@
 # Authorization
 
+**English** | [한국어](authorization.ko.md) | [日本語](authorization.ja.md)
+
 mcp-fuse is two things at once, and keeps them apart.
 
 - To an **agent** it is an ordinary MCP resource server. The agent logs in at an authorization server that
@@ -40,6 +42,15 @@ Either register the client by hand and put `client_id` (and `client_secret_file`
 backend, or let the server accept [dynamic client registration](https://www.rfc-editor.org/rfc/rfc7591) and mcp-fuse
 registers itself once. A confidential client's secret is sent as the server's metadata says it takes it
 (`client_secret_basic` by default, `client_secret_post` if that is all it offers).
+
+mcp-fuse does **not** identify itself with a
+[client ID metadata document](https://modelcontextprotocol.io/specification/latest/basic/authorization/client-registration#client-id-metadata-documents)
+(an HTTPS URL used as the `client_id`, which the authorization server fetches). The MCP authorization specification
+names that as the preferred way for a client to identify itself, and keeps dynamic registration as a fallback for
+servers that do not support it; an authorization server advertises the document form with
+`client_id_metadata_document_supported`. An authorization server that offers only that, and no
+`registration_endpoint`, needs the client registered by hand: without a configured `client_id` mcp-fuse reports that the
+server offers no client registration.
 
 mcp-fuse finds the server the way the specification has a client do it: the backend's protected resource metadata
 (from the `WWW-Authenticate` challenge, or the well-known address), then the authorization server metadata
