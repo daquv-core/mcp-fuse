@@ -125,6 +125,10 @@ mcp-fuse is an OAuth client of your authorization server. Either
   `<mcp-fuse resource origin><resource path>/connect/callback` (for `https://mcp.example.com/mcp` that is
   `https://mcp.example.com/mcp/connect/callback`). If the client is confidential, give mcp-fuse its secret in a file.
 
+mcp-fuse does not use [client ID metadata documents](https://modelcontextprotocol.io/specification/latest/basic/authorization/client-registration),
+which the specification prefers to dynamic registration. If your authorization server supports only those, register the
+client by hand ([authorization](authorization.md)).
+
 ## 3. Add it to mcp-fuse
 
 In the configuration ([reference](configuration.md)):
