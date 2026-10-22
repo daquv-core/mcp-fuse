@@ -29,6 +29,55 @@ mcp-fuse는 두 가지 역할을 동시에 하며, 둘을 서로 섞지 않습�
 
 mcp-fuse 안에서 그 사람의 신원은 introspection으로 얻은 `iss`와 `sub`의 해시입니다.
 
+#### 에이전트가 그 서버에 자신을 알리는 방법
+
+에이전트는 이 서버의 OAuth client이고, 누가 로그인하기 전에 먼저 자신을 알립니다.
+[MCP 인가 규격](https://modelcontextprotocol.io/specification/latest/basic/authorization/client-registration)은 그 방법에
+순서를 둡니다. 미리 등록된 client, 그다음 **client ID metadata document**, 그리고 둘 다 지원하지 않는 서버를 위한
+대체 수단으로 [동적 client 등록](https://www.rfc-editor.org/rfc/rfc7591)입니다.
+
+client ID metadata document는 에이전트를 만든 곳이 HTTPS URL에 올려 두는 JSON 문서이고, 그 URL이 에이전트의
+`client_id`입니다. 문서에는 에이전트의 이름과 redirect URI가 있습니다. 이런 `client_id`를 받은 인가 서버는 문서를
+가져와 그 안의 `client_id`가 문서를 가져온 URL과 같은지 확인하고, 사람을 문서에 적힌 redirect URI로만 돌려보냅니다.
+이것이 동적 등록보다 앞에 오는 이유는 다음과 같습니다.
+
+- **연결마다 등록하지 않습니다.** 에이전트는 처음 보는 서버를 계속 만납니다. 동적 등록에서는 설치마다 서버마다 새
+  client가 등록되고, 서버는 그중 무엇을 지워도 되는지 알 수 없습니다. 문서는 에이전트당 신원 하나이고, 어느 서버에서나
+  같습니다.
+- **도메인이 곧 신원입니다.** redirect URI는 요청을 보낸 쪽이 아니라 만든 곳의 도메인에 있는 문서에서 오므로,
+  관리자는 그 도메인으로 에이전트를 허용합니다.
+- **만든 곳이 최신으로 유지합니다.** 에이전트의 redirect URI나 이름이 바뀌면 문서 한 곳만 고치고, 각 서버는 가지고
+  있던 사본이 만료되면 다시 읽습니다.
+
+인가 서버에 요구되는 것은 문서를 받을 호스트로 나가는 HTTPS입니다. 격리된 네트워크에 있어 그 호스트에 닿을 수 없는
+서버는 에이전트를 미리 등록하거나 동적 등록을 씁니다. 문서를 받는 서버는 메타데이터의
+`client_id_metadata_document_supported`로 그렇다고 알리고, 에이전트는 그 값을 봅니다.
+
+#### Keycloak에서
+
+Keycloak은 client ID metadata document를 받습니다.
+[Keycloak의 MCP 가이드](https://www.keycloak.org/securing-apps/mcp-authz-server)에 절차와 에이전트별 설정이 있습니다.
+요약하면 다음과 같습니다.
+
+1. **기능을 켭니다.** 기동할 때 `--features=cimd`를 줍니다. 지원 수준은 가이드에 적혀 있습니다. Keycloak이 실험
+   기능으로 표시한 기능은 어느 릴리스에서든 바뀔 수 있으므로, 업그레이드할 때마다 에이전트의 로그인을 다시 시험하세요.
+   기능이 켜지면 서버의 메타데이터에 `client_id_metadata_document_supported`가 실립니다.
+2. **client profile**(*Realm settings* → *Client policies* → *Profiles*)에 `client-id-metadata-document` executor를
+   추가합니다. *Trusted domains*: 받을 문서의 호스트와 문서 안 주소(redirect URI, 로고)의 호스트. *Allow http scheme*:
+   끕니다. *Only Allow Confidential Client*: 끕니다. 데스크톱 에이전트는 public client입니다. *Restrict same domain*:
+   자기 컴퓨터(`localhost`)로 돌아오는 에이전트는 끄고, redirect URI가 만든 곳의 도메인에 있는 에이전트는 켭니다.
+3. **client policy**(*Client policies* → *Policies*)에 `client-id-uri` condition을 추가합니다. scheme은 `https`,
+   *Trusted domains*는 `client_id` URL의 호스트입니다. 위 profile과 연결합니다. `client_id` URL의 도메인이 같은
+   에이전트들은 서로의 policy에 걸리므로, policy 하나와 모두를 만족하는 설정의 profile 하나로 허용하세요.
+4. **Keycloak이 그 호스트에 HTTPS로 닿게 합니다.** 밖으로 나가는 통신이 proxy를 거친다면 그 proxy를 통해서입니다.
+5. **audience에 mcp-fuse의 `resource`를 넣습니다.** Keycloak은 문서마다 client를 만들고 realm의 기본 client scope를
+   붙이므로, realm 기본 client scope에 mcp-fuse의 `resource`를 넣는 *Audience* mapper를 두면 이 에이전트들에게도
+   적용됩니다. 문서에 `scope`가 있으면 기본으로는 basic scope만 붙습니다. 그런 에이전트의 audience는 `resource`
+   파라미터에서 와야 하고, Keycloak은 `resource-indicators` 기능으로 그것을 처리합니다. 에이전트가 받은 token을
+   디코드해 `aud`를 읽으세요.
+
+Keycloak은 문서 URL마다 client를 하나만 두고 문서에서 갱신하므로, 연결마다 client가 쌓이지 않습니다.
+
 ### 2. 각 backend의 인가 서버
 
 그 서버에 mcp-fuse가 다음 조건의 OAuth client로 알려져 있어야 합니다.

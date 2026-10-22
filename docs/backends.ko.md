@@ -60,6 +60,9 @@ mcp-fuse는 그래도 backend마다 별도의 token을 얻습니다([authorizati
 서버가 브라우저의 로그인 세션을 유지한다면 backend를 연결할 때 다시 로그인하라고 묻지 않는다는 점입니다. 그 밖에
 무엇이 보이는지는 서버의 동의 설정에 달려 있습니다.
 
+에이전트가 당신의 Keycloak에서 로그인한다면, 에이전트가 client ID metadata document로 자신을 알리게 하세요
+([authorization](authorization.ko.md#keycloak에서)).
+
 ### 만들어진 서버가 분명히 알려 주지 않는 두 가지
 
 인가 서버가 무엇을 공개하고 받아들여야 하는지는 1절(메타데이터, PKCE `S256`, `resource` 파라미터, refresh token)과
