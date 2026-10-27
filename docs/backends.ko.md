@@ -28,6 +28,8 @@ MCP 서버의 인가는 두 부분으로 나뉘며, 보통 서로 다른 소프�
 
 #### Keycloak을 쓴다면, 할 일
 
+화면과 값을 처음부터 끝까지: [a complete setup with Keycloak](keycloak.ko.md).
+
 1. **운영하고 유지합니다.** 운영용 데이터베이스를 주고 백업을 보호하세요. 기본 설정에서는 realm의 설정과 사용자
    외에 realm의 서명 키도 거기에 있습니다. 업그레이드를 계획하세요. Keycloak은 최신 마이너 릴리스를 지원합니다
    ([릴리스 정책](https://github.com/keycloak/keycloak/blob/main/RELEASES.md)).

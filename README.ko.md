@@ -93,6 +93,7 @@ cp examples/config.json config.json          # 편집
 - [Adding your MCP server](docs/backends.ko.md) — 무엇을 만들고, 무엇을 등록하고, 무엇을 추가하는지.
 - [Configuration](docs/configuration.ko.md) — 모든 설정 키.
 - [Authorization](docs/authorization.ko.md) — 무엇을 어디에 등록하는지, backend를 어떻게 연결하는지.
+- [A complete setup with Keycloak](docs/keycloak.ko.md) — Keycloak, 관리 화면, mcp-fuse를 처음부터 끝까지.
 - [Deployment](docs/deployment.ko.md) — 빌드, 파일, 리버스 프록시, 운영.
 - [Security model](docs/security.ko.md) — 보장하는 것과 사용자에게 남기는 것.
 - [Protocol](docs/protocol.ko.md) — 처리하는 것, 지원하는 MCP 개정, 오류.
