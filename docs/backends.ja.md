@@ -28,6 +28,8 @@ MCP サーバーの認可は 2 つの部分に分かれ、通常は別々のソ�
 
 #### Keycloak を使う場合にすること
 
+画面と値を最初から最後まで：[a complete setup with Keycloak](keycloak.ja.md)。
+
 1. **運用して維持します。** 本番用のデータベースを用意してバックアップを保護してください。既定の構成では、realm の
    設定とユーザーに加えて、realm の署名鍵もそこに保管されます。アップグレードを計画してください。Keycloak は最新の
    マイナーリリースをサポートします（[リリースポリシー](https://github.com/keycloak/keycloak/blob/main/RELEASES.md)）。

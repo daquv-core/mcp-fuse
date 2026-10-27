@@ -93,6 +93,7 @@ mcp-fuse を登録します（[authorization](docs/authorization.ja.md)）。**�
 - [Adding your MCP server](docs/backends.ja.md) — 何を作り、何を登録し、何を追加するか。
 - [Configuration](docs/configuration.ja.md) — すべての設定キー。
 - [Authorization](docs/authorization.ja.md) — 何をどこに登録するか、backend をどう接続するか。
+- [A complete setup with Keycloak](docs/keycloak.ja.md) — Keycloak、管理コンソール、mcp-fuse を最初から最後まで。
 - [Deployment](docs/deployment.ja.md) — ビルド、ファイル、リバースプロキシ、運用。
 - [Security model](docs/security.ja.md) — 保証すること、利用者に任せること。
 - [Protocol](docs/protocol.ja.md) — 扱うもの、対応する MCP リビジョン、エラー。

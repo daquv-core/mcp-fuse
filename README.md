@@ -89,6 +89,7 @@ the authorization servers ([authorization](docs/authorization.md)). Run **one in
 - [Adding your MCP server](docs/backends.md) — what to build, what to register, what to add.
 - [Configuration](docs/configuration.md) — every key.
 - [Authorization](docs/authorization.md) — what to register where, and how a backend is connected.
+- [A complete setup with Keycloak](docs/keycloak.md) — Keycloak, its admin console, and mcp-fuse, end to end.
 - [Deployment](docs/deployment.md) — build, files, reverse proxy, operating it.
 - [Security model](docs/security.md) — what is guaranteed and what is left to you.
 - [Protocol](docs/protocol.md) — what it handles, which MCP revisions, errors.

@@ -58,9 +58,10 @@ never rebuilds - keep it that way, or a release stops being what was published a
 - `README.md` - what it is, what it does not do, how to start. English is the source; `README.ko.md` and
   `README.ja.md` are translations that follow it. Change all three together.
 - `docs/` - backends (for people who build a server to put behind mcp-fuse), configuration, authorization,
-  deployment, security, protocol. English is the source; `docs/<name>.ko.md` and `docs/<name>.ja.md` are translations
-  that follow it, each linking to its own language's documents and opening with the language switch. Change an
-  English document and its two translations together. Each fact lives in one place and the other documents link to it.
+  deployment, security, protocol, and a complete Keycloak setup (`keycloak`). English is the source;
+  `docs/<name>.ko.md` and `docs/<name>.ja.md` are translations that follow it, each linking to its own language's
+  documents and opening with the language switch. Change an English document and its two translations together.
+  Each fact lives in one place and the other documents link to it.
 - Commit messages, pull request titles and descriptions, and issues are in English, and do not name systems that are
   not part of this project.
 - Documents state what is true whatever the release: no "first implementation", "not released", "not yet" or

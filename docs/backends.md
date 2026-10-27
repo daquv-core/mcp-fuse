@@ -29,6 +29,8 @@ described below, but it is security-sensitive code that you review and patch for
 
 #### If you use Keycloak, you
 
+Every screen and value, end to end: [a complete setup with Keycloak](keycloak.md).
+
 1. **Run it and keep it.** Give it a production database and protect its backups: besides the realm's configuration and
    users, a default setup keeps the realm's signing keys there. Plan for upgrades: Keycloak supports its latest minor
    release ([release policy](https://github.com/keycloak/keycloak/blob/main/RELEASES.md)).
