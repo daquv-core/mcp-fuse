@@ -41,7 +41,13 @@ jobs:
       - name: Publish
         run: |
           docker tag "mcp-fuse:ci-${GITHUB_SHA}" "$IMG:${GITHUB_SHA}"
-          docker push -q "$IMG:${GITHUB_SHA}"
-          # `:main` follows the newest commit; nothing should deploy from it.
-          docker buildx imagetools create -t "$IMG:main" "$IMG:${GITHUB_SHA}" >/dev/null \
+          set -o pipefail  # the default run shell is `bash -e`, without pipefail; the push below is piped
+          docker push "$IMG:${GITHUB_SHA}" | tee "$RUNNER_TEMP/push-mcp-fuse.log"
+          DIGEST=$(grep -oE 'digest: sha256:[0-9a-f]{64}' "$RUNNER_TEMP/push-mcp-fuse.log" | tail -1 | cut -d' ' -f2) || true  # pipefail: no match must reach the error below
+          [ -n "$DIGEST" ] || { echo "::error::docker push printed no digest for $IMG:${GITHUB_SHA}"; exit 1; }
+          # control-plane deploys by this digest (adr/fx1lrq), not by the mutable tag; the annotation is how it learns it.
+          echo "::notice title=release-digest::${IMG}:${GITHUB_SHA}@${DIGEST}"
+          # `:main` follows the newest commit, moved to the digest just pushed - never re-resolved from the tag.
+          # Nothing should deploy from it: control-plane deploys the digest annotated above.
+          docker buildx imagetools create -t "$IMG:main" "$IMG@${DIGEST}" >/dev/null \
             || echo "::warning::could not move $IMG:main to ${GITHUB_SHA} (:${GITHUB_SHA} is published)"

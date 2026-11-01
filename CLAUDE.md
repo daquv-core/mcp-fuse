@@ -36,7 +36,8 @@ Go, standard library only (no dependencies - keep `go.mod` free of `require`). O
 one state file, one instance. `./build.sh` builds it; `go test -race ./...` tests it.
 
 CI (`.github/workflows/`): `check` on every pull request; `publish` on every push to `main`, which pushes
-`ghcr.io/daquv-core/mcp-fuse:<sha>` (the Dockerfile's `release` stage: `FROM scratch`, one layer, the binary alone);
+`ghcr.io/daquv-core/mcp-fuse:<sha>` (the Dockerfile's `release` stage: `FROM scratch`, one layer, the binary alone)
+and annotates the pushed digest as `release-digest`, which control-plane deploys by (control-plane `adr/fx1lrq`);
 `release` on a `v*` tag, which copies the binary out of that commit's image into a draft GitHub Release. A release
 never rebuilds - keep it that way, or a release stops being what was published and run. Nothing deploys on merge.
 
