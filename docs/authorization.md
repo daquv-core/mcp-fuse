@@ -9,7 +9,9 @@ mcp-fuse is two things at once, and keeps them apart.
 - To each **backend** it is an ordinary MCP client. It holds, per person and per backend, a token **issued by that
   backend's own authorization server, for that person**.
 
-The token an agent presents is checked and then used for nothing else. It is never sent to a backend. The
+The token an agent presents is checked and then used for nothing else — except as the subject of a token exchange at
+the server that issued it, for a backend that trusts that server ([below](#backends-that-trust-the-callers-authorization-server)).
+It is never sent to a backend. The
 [MCP authorization specification](https://modelcontextprotocol.io/specification/latest/basic/authorization) forbids a
 server to accept or pass on tokens not issued for it ("token passthrough"); this is how mcp-fuse avoids it, and why a
 backend needs nothing beyond being a standard MCP server.
@@ -128,6 +130,27 @@ link for it in the instructions.
 A cookie set when the link is opened ties steps 2–4 to that browser, and each `state` value is used once. So the
 backend's sign-in address, handed to someone else, cannot be finished by them: without the cookie the callback is
 refused. See [security](security.md) for why both measures are needed.
+
+## Backends that trust the callers' authorization server
+
+A backend whose authorization server is the one agents log in at (the first of `authorization_servers`) can be
+configured `"auth": "exchange"`. Its token is then not given by the person: mcp-fuse exchanges the token the caller
+presented ([RFC 8693](https://www.rfc-editor.org/rfc/rfc8693)) at that server, as the `auth` client, for a token whose
+audience is the backend (`resource` set to the backend, `scope` as configured). Nobody connects such a backend, no link
+is shown for it, and nothing about it is stored: a token is kept in memory until shortly before it expires, and is
+exchanged again when it lapses or when the backend refuses it. If the backend refuses the new one too, the request
+fails; there is nothing a person could connect.
+
+This is not token passthrough. The caller's token goes back to the server that issued it, never to a backend, and the
+backend receives a token issued for itself alone. The server must allow:
+
+- the `auth` client to make token exchanges (it is a confidential client);
+- that client to exchange a token issued for mcp-fuse — servers commonly require the exchanging client to be in the
+  subject token's audience;
+- that client, and no other, to obtain the scope that puts each such backend into a token's audience.
+
+mcp-fuse does not exchange for a backend whose protected resource metadata names another authorization server: a token
+from the callers' server would not be accepted there.
 
 ## Refresh and revocation
 

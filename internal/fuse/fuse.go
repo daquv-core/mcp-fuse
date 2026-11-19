@@ -58,9 +58,10 @@ type Fuse struct {
 	frontSecret string
 	oc          *oauthc.Client
 
-	sessMu   sync.Mutex
-	sessions map[sessionKey]bsession
-	locks    sync.Map // key -> *sync.Mutex
+	sessMu    sync.Mutex
+	sessions  map[sessionKey]bsession
+	exchanges exchangeCache
+	locks     sync.Map // key -> *sync.Mutex
 
 	pendMu  sync.Mutex
 	pending map[string]pendingAuth
@@ -193,7 +194,9 @@ func (f *Fuse) serveMCP(w http.ResponseWriter, r *http.Request) {
 	if !validRequestID.MatchString(reqID) {
 		reqID = newRequestID() // a caller-supplied id is only passed on if it is plainly an id
 	}
-	r = r.WithContext(context.WithValue(r.Context(), reqIDKey{}, reqID))
+	ctx := context.WithValue(r.Context(), reqIDKey{}, reqID)
+	ctx = context.WithValue(ctx, callerTokenKey{}, token) // the subject of an exchange, and nothing else (exchange.go)
+	r = r.WithContext(ctx)
 	c := &call{in: r, body: body, env: env, person: person, reqID: reqID, start: time.Now()}
 
 	switch {

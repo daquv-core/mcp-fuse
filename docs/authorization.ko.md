@@ -9,7 +9,9 @@ mcp-fuse는 두 가지 역할을 동시에 하며, 둘을 서로 섞지 않습�
 - 각 **backend**에게는 표준 MCP client입니다. 사람별, backend별로 **그 backend의 인가 서버가 그 사람을 위해
   발급한 token**을 보관합니다.
 
-에이전트가 내민 token은 확인한 뒤 다른 곳에는 쓰지 않으며, backend로 보내지 않습니다.
+에이전트가 내민 token은 확인한 뒤 다른 곳에는 쓰지 않습니다. 예외는 그 token을 발급한 서버를 신뢰하는 backend를
+위해 그 서버에서 token exchange의 subject로 쓰는 것뿐입니다([아래](#호출자의-인가-서버를-신뢰하는-backend)). backend로는
+보내지 않습니다.
 [MCP 인가 규격](https://modelcontextprotocol.io/specification/latest/basic/authorization)은 서버가 자신을 위해
 발급되지 않은 token을 받거나 다른 곳으로 넘기는 일("token passthrough")을 금지합니다. mcp-fuse는 이렇게 그것을
 피하며, 그래서 backend는 표준 MCP 서버이기만 하면 됩니다.
@@ -123,6 +125,26 @@ backend의 링크가 들어 있습니다.
 링크를 열 때 심는 cookie가 2~4단계를 그 브라우저에 묶고, `state` 값은 한 번만 쓸 수 있습니다. 그래서 backend의
 로그인 주소를 다른 사람에게 건네도 그 사람은 끝낼 수 없습니다. cookie가 없으면 callback이 거부됩니다. 두 장치가
 모두 필요한 이유는 [security](security.ko.md)를 보세요.
+
+## 호출자의 인가 서버를 신뢰하는 backend
+
+인가 서버가 에이전트가 로그인하는 서버(`authorization_servers`의 첫 서버)와 같은 backend는 `"auth": "exchange"`로
+설정할 수 있습니다. 그러면 그 backend의 token은 사람이 주지 않습니다. mcp-fuse가 호출자가 내민 token을 그 서버에서
+`auth` client로 교환해([RFC 8693](https://www.rfc-editor.org/rfc/rfc8693)) backend를 audience로 하는 token을
+받습니다(`resource`는 backend, `scope`는 설정값). 이런 backend는 아무도 연결하지 않고, 링크도 보이지 않으며, 저장되는
+것도 없습니다. token은 만료 직전까지 메모리에 두고, 만료되거나 backend가 거절하면 다시 교환합니다. 새 token도
+거절되면 요청은 실패합니다. 사람이 연결해서 고칠 수 있는 것이 없기 때문입니다.
+
+이것은 token passthrough가 아닙니다. 호출자의 token은 그것을 발급한 서버로만 돌아가고 backend로는 가지 않으며,
+backend는 자신만을 위해 발급된 token을 받습니다. 서버는 다음을 허용해야 합니다.
+
+- `auth` client가 token exchange를 하는 것(confidential client입니다)
+- 그 client가 mcp-fuse를 위해 발급된 token을 교환하는 것 — 서버는 흔히 교환하는 client가 subject token의
+  audience에 있기를 요구합니다
+- 그 client만, 그런 backend를 token의 audience에 넣는 scope를 받는 것
+
+protected resource metadata가 다른 인가 서버를 가리키는 backend에 대해서는 교환하지 않습니다. 호출자의 서버가 준
+token을 그 backend는 받지 않기 때문입니다.
 
 ## 갱신과 폐기
 

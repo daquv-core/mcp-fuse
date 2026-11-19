@@ -9,7 +9,8 @@ mcp-fuse는 에이전트와 데이터를 가진 시스템들 사이에 있으므
 ## 보장하는 것
 
 **token을 다른 곳으로 넘기지 않습니다.** 에이전트가 내민 token은 mcp-fuse를 위한 것입니다. introspect하고,
-mcp-fuse의 `resource`가 audience에 있어야 하며, 호출자가 누구인지 아는 데에만 씁니다. backend는 자기 인가 서버가
+mcp-fuse의 `resource`가 audience에 있어야 하며, 호출자가 누구인지 아는 데에 씁니다. `exchange`로 설정한 backend에
+대해서는 그 token을 발급한 서버에서 token exchange의 subject로도 씁니다. backend는 자기 인가 서버가
 그 사람을 위해, 그 backend를 audience로 하여 발급한 token만 받습니다. 호출자의 token을 전달하면 backend가
 자신을 위한 것이 아닌 token을 받거나, 한 서비스용 token을 가진 공격자가 다른 서비스에서 재사용할 수 있습니다.
 MCP 인가 규격이 금지하는 confused deputy 문제입니다("token passthrough").

@@ -23,7 +23,8 @@ AI 에이전트(ChatGPT, Gemini, Claude, 사내 AI 비서 등)는 MCP 엔드포�
 
 ### backend 연결하기
 
-backend는 사람마다 한 번 연결합니다.
+backend는 사람마다 한 번 연결합니다. 에이전트가 로그인하는 인가 서버를 신뢰하는 backend는 연결할 필요가
+없습니다. mcp-fuse가 그곳에서 에이전트의 token을 그 backend용 token으로 교환합니다([인가](docs/authorization.ko.md)).
 
 1. 에이전트가 `initialize`를 호출합니다. 그 사람이 아직 연결하지 않은 backend마다 instructions에 링크가 들어
    있습니다.

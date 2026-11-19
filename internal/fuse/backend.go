@@ -171,13 +171,21 @@ func (f *Fuse) ensureSession(ctx context.Context, person string, idx int, token 
 	return o.sess, err
 }
 
-// withToken runs fn with the person's token for the backend. If the backend refuses the token, it is refreshed
-// once and fn runs again; if it is refused again the grant is dropped and the person has to connect again.
+// withToken runs fn with the person's token for the backend. If the backend refuses the token, it is renewed once
+// (refreshed, or exchanged again) and fn runs again. If it is refused again: an "oauth" grant is dropped and the
+// person has to connect again; an exchanged token is forgotten and the call fails.
 func withToken[T any](f *Fuse, ctx context.Context, person string, idx int, fn func(token string) (T, error)) (T, error) {
 	var zero T
 	bk := f.cfg.Backends[idx]
 	token := ""
-	if bk.OAuth() {
+	switch {
+	case bk.Exchange():
+		t, err := f.exchanged(ctx, person, idx, "")
+		if err != nil {
+			return zero, err
+		}
+		token = t
+	case bk.OAuth():
 		t, err := f.oc.AccessToken(ctx, person, idx)
 		if err != nil {
 			return zero, err
@@ -189,19 +197,27 @@ func withToken[T any](f *Fuse, ctx context.Context, person string, idx int, fn f
 		if !errors.Is(err, errUnauthorized) {
 			return v, err
 		}
-		if !bk.OAuth() {
+		if !bk.Token() {
 			return zero, errors.New("backend refused a request that carried no token")
 		}
 		if attempt == 0 {
-			t, rerr := f.oc.Refresh(ctx, person, idx, token)
+			var rerr error
+			if bk.Exchange() {
+				token, rerr = f.exchanged(ctx, person, idx, token)
+			} else {
+				token, rerr = f.oc.Refresh(ctx, person, idx, token)
+			}
 			if rerr != nil {
 				return zero, rerr
 			}
-			token = t
 			continue
 		}
-		_ = f.store.Delete(person, bk.Name)
 		f.dropSession(sessionKey{person, idx})
+		if bk.Exchange() {
+			f.exchanges.drop(sessionKey{person, idx})
+			return zero, errExchangeRefused
+		}
+		_ = f.store.Delete(person, bk.Name)
 		return zero, oauthc.ErrNotConnected
 	}
 }
@@ -250,8 +266,8 @@ func (f *Fuse) do(ctx context.Context, person string, idx int, body []byte, crea
 
 var errNoSession = errors.New("no session")
 
-// connected says whether the person can be served by the backend right now: it asks for no token, or the person
-// has connected it.
+// connected says whether the person can be served by the backend right now: it asks for no token, its token is
+// exchanged for the caller's, or the person has connected it.
 func (f *Fuse) connected(person string, idx int) bool {
 	bk := f.cfg.Backends[idx]
 	if !bk.OAuth() {

@@ -51,6 +51,18 @@ func TestConfigRejects(t *testing.T) {
 		"oauth without state file":  func(c *Config) { c.StateFile = "" },
 		"oauth without secret file": func(c *Config) { c.SecretFile = "" },
 		"client secret, no id":      func(c *Config) { c.Backends[0].ClientSecretFile = "/etc/mcp-fuse/sessionful-secret" },
+		"exchange without client secret": func(c *Config) {
+			c.Backends[0].Auth = "exchange"
+		},
+		"exchange without callers": func(c *Config) {
+			c.Backends = []Backend{{Name: "x", URL: "http://127.0.0.1:1/mcp", Auth: "exchange"}}
+			c.Auth = Auth{ClientSecretFile: "/etc/mcp-fuse/front"}
+		},
+		"exchange with its own client": func(c *Config) {
+			c.Auth.ClientSecretFile = "/etc/mcp-fuse/front"
+			c.Backends[0].Auth, c.Backends[0].ClientID = "exchange", "other"
+		},
+		"scope without exchange": func(c *Config) { c.Backends[0].Scope = "s" },
 	}
 	for name, mutate := range cases {
 		c := validConfig()
@@ -84,5 +96,18 @@ func TestConfigFileRejectsUnknownKeys(t *testing.T) {
 func TestExampleConfigIsValid(t *testing.T) {
 	if _, err := Load("../../examples/config.json"); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestConfigExchangeNeedsNoState(t *testing.T) {
+	c := validConfig()
+	c.StateFile, c.SecretFile = "", ""
+	c.Auth.ClientSecretFile = "/etc/mcp-fuse/front"
+	c.Backends = []Backend{{Name: "registry", URL: "http://127.0.0.1:8081/mcp", Auth: "exchange", Scope: "registry"}}
+	if err := c.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if c.Backends[0].OAuth() || !c.Backends[0].Exchange() || !c.Backends[0].Token() {
+		t.Fatalf("exchange backend reads as %+v", c.Backends[0])
 	}
 }

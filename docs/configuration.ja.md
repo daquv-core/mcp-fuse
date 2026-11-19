@@ -18,15 +18,16 @@ mcp-fuse は `-config` で指定した JSON ファイルを 1 つ読みます（
 | `auth` | 下記参照 | 呼び出し元のトークンをどう確認するか。 |
 | `auth.introspection_url` | `auth` があれば必須 | [RFC 7662](https://www.rfc-editor.org/rfc/rfc7662) のエンドポイント。トークンが active で、subject を持ち、audience に `resource` が含まれていれば受け付けます。 |
 | `auth.client_id` | `auth` があれば必須 | その認可サーバーでの mcp-fuse の OAuth クライアント。introspection エンドポイントへの認証と、backend 接続時の人のサインインに使います。 |
-| `auth.client_secret_file` | いいえ | クライアントのシークレットを入れたファイル。なければクライアントは public で、id だけを送ります。 |
+| `auth.client_secret_file` | `exchange` backend があるとき | クライアントのシークレットを入れたファイル。なければクライアントは public で、id だけを送ります。 トークン交換は confidential クライアントが行うため、`exchange` backend があれば必要です。 |
 | `state_file` | `oauth` の backend があるとき | grant を暗号化して保管する場所。失うと全員が再接続することになりますが、これに依存するものは他にありません。 |
 | `secret_file` | `oauth` の backend があるとき | 32 バイト以上。`state_file` を暗号化する鍵と接続リンクに署名する鍵が、それぞれの用途のためにここから導出されます。 |
 | `backends` | はい | 統合する MCP サーバー。優先順位順です（下記参照）。 |
 | `backends[].name` | はい | 一意であること。ログ、instructions、接続リンクに現れるため、`/`、`?`、`#`、空白を含めてはいけません。 |
 | `backends[].url` | はい | backend の MCP エンドポイント（http または https）。 |
-| `backends[].auth` | いいえ | `"oauth"`（既定）: 人ごとに backend を接続し、mcp-fuse はその人自身のトークンを使います。`"none"`: backend はトークンを要求しません。 |
-| `backends[].client_id` | いいえ | backend の認可サーバーに mcp-fuse 用として事前登録したクライアント。なければ mcp-fuse が自分で登録（[RFC 7591](https://www.rfc-editor.org/rfc/rfc7591)）し、結果を記憶します。 |
-| `backends[].client_secret_file` | いいえ | そのクライアントが confidential の場合の、シークレットを入れたファイル。`client_id` が必要です。 |
+| `backends[].auth` | いいえ | `"oauth"`（既定）: 人ごとに backend を接続し、mcp-fuse はその人自身のトークンを使います。`"exchange"`: backend は `authorization_servers` の最初のサーバーを信頼します。mcp-fuse は呼び出し元のトークンをそこでその backend を audience とするトークンに交換するため、誰も接続しません（[認可](authorization.ja.md#呼び出し元の認可サーバーを信頼する-backend)）。`"none"`: backend はトークンを要求しません。 |
+| `backends[].client_id` | いいえ | `oauth` のみ。backend の認可サーバーに mcp-fuse 用として事前登録したクライアント。なければ mcp-fuse が自分で登録（[RFC 7591](https://www.rfc-editor.org/rfc/rfc7591)）し、結果を記憶します。 |
+| `backends[].client_secret_file` | いいえ | `oauth` のみ。そのクライアントが confidential の場合の、シークレットを入れたファイル。`client_id` が必要です。 |
+| `backends[].scope` | いいえ | `exchange` のみ。交換したトークンを要求するときの scope — そのサーバーで backend をトークンの audience に入れる scope です。既定: backend の protected resource metadata の `scopes_supported`。 |
 | `list_timeout_seconds` | いいえ | `initialize` と一覧が backend を待つ時間。既定は 15。 |
 
 `auth` を省略できるのは、すべての backend が `"auth": "none"` のときだけです。保管する人ごとのトークンがなければ、

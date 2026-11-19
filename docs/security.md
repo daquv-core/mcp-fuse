@@ -9,8 +9,9 @@ you. To report a vulnerability, see [SECURITY.md](../SECURITY.md).
 ## What it guarantees
 
 **It never passes a token on.** The token an agent presents is for mcp-fuse: it is introspected, must have mcp-fuse's
-`resource` as an audience, and is used to learn who the caller is. A backend only ever receives a token issued by its
-own authorization server, for that person, with that backend as the audience. Forwarding the caller's token would
+`resource` as an audience, and is used to learn who the caller is — and, for a backend configured `exchange`, as the
+subject of a token exchange at the server that issued it. A backend only ever receives a token issued by its own
+authorization server, for that person, with that backend as the audience. Forwarding the caller's token would
 have a backend accept a token not meant for it, or an attacker with a token for one service reuse it at another —
 the confused-deputy problem the MCP authorization specification forbids ("token passthrough").
 

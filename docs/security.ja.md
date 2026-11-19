@@ -9,7 +9,8 @@ mcp-fuse はエージェントとデータを持つシステムの間にある�
 ## 保証すること
 
 **トークンを他へ渡しません。** エージェントが提示したトークンは mcp-fuse 向けのものです。introspect し、
-mcp-fuse の `resource` が audience に含まれている必要があり、呼び出し元が誰かを知るためにだけ使います。backend が
+mcp-fuse の `resource` が audience に含まれている必要があり、呼び出し元が誰かを知るために使います。`exchange` と設定した
+backend については、発行元のサーバーでトークン交換の subject としても使います。backend が
 受け取るのは、その backend 自身の認可サーバーが、その人のために、その backend を audience として発行したトークン
 だけです。呼び出し元のトークンを転送すると、backend が自分宛てでないトークンを受け入れたり、あるサービス用の
 トークンを持つ攻撃者が別のサービスで再利用したりできてしまいます。MCP 認可仕様が禁じる confused deputy 問題
