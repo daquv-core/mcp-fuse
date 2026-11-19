@@ -156,6 +156,21 @@ backend の scope は既定の scope に**しません**。既定の scope は�
 
 standard flow の client では refresh token が既定で有効です。有効のままにします。
 
+### 2.5a または: 接続なしで（トークン交換）
+
+ここの backend はエージェントがログインする同じ realm を信頼しているので、人ごとに接続する代わりに、mcp-fuse が
+エージェントのトークンを各 backend のトークンに交換できます（[認可](authorization.ja.md#呼び出し元の認可サーバーを信頼する-backend)）。
+その場合は 2.5 を飛ばして次を設定します。
+
+| どこで | 設定 |
+|---|---|
+| `mcp-fuse` → *Settings* → *Capability config* | *Standard Token Exchange* On |
+| `mcp-fuse` → *Client scopes* → **Add client scope** | `orders`、`analytics` を **Optional** として追加 |
+
+エージェントのトークンには、すでに audience に `mcp-fuse` が含まれています（2.3）。Keycloak はクライアントが交換する
+トークンにこれを求めます。3 節では、各 backend に `client_id` と `client_secret_file` の代わりに `"auth": "exchange"` と
+`"scope"` を置きます。その場合 `state_file` と `secret_file` は不要です。
+
 ### 2.6 エージェント
 
 エージェントは realm の client です。`mcp-fuse` scope を受け取るよう、2.3 のあとに作ります。
@@ -212,4 +227,5 @@ client ID metadata document で自分を知らせるエージェントには実�
 | 属性 | 上のどちらかのトークン | `tenant_id` があり、ユーザーは自分のアカウントページで変更できません |
 | Introspection | `curl -u mcp-fuse:<secret> -d token=<エージェントのトークン> <introspection_url>` | `"active": true`、そして上の `aud` |
 | 接続 | エージェントを接続し、`initialize` が示すリンクを開いてサインイン | backend のツールがエージェントの一覧に現れます |
+| 交換（2.5a） | エージェントを接続 | backend のツールがすぐに現れ、`initialize` にリンクはありません |
 | 拒否 | backend のトークンを mcp-fuse に、エージェントのトークンを backend に提示 | どちらも `401` で拒否されます |

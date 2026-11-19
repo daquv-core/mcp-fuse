@@ -156,6 +156,21 @@ mcp-fuse를 거치지 않고 backend를 바로 열 수 있게 됩니다.
 
 standard flow client는 refresh token이 기본으로 켜져 있습니다. 켜 둔 채로 둡니다.
 
+### 2.5a 또는: 연결 없이 (token exchange)
+
+여기의 backend들은 에이전트가 로그인하는 같은 realm을 신뢰하므로, 사람마다 연결하는 대신 mcp-fuse가 에이전트의
+token을 각 backend의 token으로 교환할 수 있습니다([인가](authorization.ko.md#호출자의-인가-서버를-신뢰하는-backend)).
+그러려면 2.5를 건너뛰고 다음을 설정합니다.
+
+| 어디서 | 설정 |
+|---|---|
+| `mcp-fuse` → *Settings* → *Capability config* | *Standard Token Exchange* On |
+| `mcp-fuse` → *Client scopes* → **Add client scope** | `orders`, `analytics`를 **Optional**로 추가 |
+
+에이전트의 token은 이미 audience에 `mcp-fuse`가 있습니다(2.3). Keycloak은 client가 교환하는 token에 이것을
+요구합니다. 3절에서는 각 backend에 `client_id`와 `client_secret_file` 대신 `"auth": "exchange"`와 `"scope"`를 둡니다.
+그러면 `state_file`과 `secret_file`은 필요 없습니다.
+
 ### 2.6 에이전트
 
 에이전트는 realm의 client입니다. `mcp-fuse` scope를 받도록 2.3 다음에 만듭니다.
@@ -211,4 +226,5 @@ client ID metadata document로 자신을 알리는 에이전트에는 실험 기
 | 속성 | 위 두 토큰 중 하나 | `tenant_id`가 있고, 사용자가 자기 계정 페이지에서 고칠 수 없습니다 |
 | Introspection | `curl -u mcp-fuse:<secret> -d token=<에이전트 토큰> <introspection_url>` | `"active": true`, 그리고 위의 `aud` |
 | 연결 | 에이전트를 연결하고, `initialize`가 준 링크를 열어 로그인 | backend의 도구가 에이전트 목록에 나타납니다 |
+| 교환(2.5a) | 에이전트를 연결 | backend의 도구가 바로 나타나고, `initialize`에 링크가 없습니다 |
 | 거절 | backend 토큰을 mcp-fuse에, 에이전트 토큰을 backend에 제시 | 둘 다 `401`로 거절됩니다 |

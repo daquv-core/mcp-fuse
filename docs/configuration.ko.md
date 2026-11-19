@@ -18,15 +18,16 @@ mcp-fuse는 `-config`로 지정한 JSON 파일 하나를 읽습니다(기본 `co
 | `auth` | 아래 참고 | 호출자의 token을 확인하는 방법. |
 | `auth.introspection_url` | `auth`가 있으면 예 | [RFC 7662](https://www.rfc-editor.org/rfc/rfc7662) 엔드포인트. token이 active이고, subject를 말하며, audience 중에 `resource`가 있으면 받아들입니다. |
 | `auth.client_id` | `auth`가 있으면 예 | 그 인가 서버에서 mcp-fuse가 쓰는 OAuth client. introspection 엔드포인트에 인증하고, backend를 연결할 때 사람을 로그인시킵니다. |
-| `auth.client_secret_file` | 아니오 | client의 secret이 든 파일. 없으면 client는 public이고 id만 보냅니다. |
+| `auth.client_secret_file` | `exchange` backend가 있으면 | client의 secret이 든 파일. 없으면 client는 public이고 id만 보냅니다. token exchange는 confidential client가 하므로 `exchange` backend가 있으면 필요합니다. |
 | `state_file` | `oauth` backend가 있으면 | grant를 암호화해 보관하는 곳. 잃으면 모두가 다시 연결해야 하며, 그 밖에 이것에 의존하는 것은 없습니다. |
 | `secret_file` | `oauth` backend가 있으면 | 32바이트 이상. `state_file`을 암호화하는 키와 연결 링크에 서명하는 키가 각각의 용도로 이것에서 파생됩니다. |
 | `backends` | 예 | 합칠 MCP 서버들. 우선순위 순서입니다(아래 참고). |
 | `backends[].name` | 예 | 고유해야 합니다. 로그, instructions, 연결 링크에 나타나므로 `/`, `?`, `#`, 공백이 없어야 합니다. |
 | `backends[].url` | 예 | backend의 MCP 엔드포인트(http 또는 https). |
-| `backends[].auth` | 아니오 | `"oauth"`(기본): 사람마다 backend를 연결하고 mcp-fuse는 그 사람 본인의 token을 씁니다. `"none"`: backend가 token을 요구하지 않습니다. |
-| `backends[].client_id` | 아니오 | backend의 인가 서버에 mcp-fuse용으로 미리 등록한 client. 없으면 mcp-fuse가 스스로 등록([RFC 7591](https://www.rfc-editor.org/rfc/rfc7591))하고 결과를 기억합니다. |
-| `backends[].client_secret_file` | 아니오 | 그 client가 confidential이면 그 secret이 든 파일. `client_id`가 필요합니다. |
+| `backends[].auth` | 아니오 | `"oauth"`(기본): 사람마다 backend를 연결하고 mcp-fuse는 그 사람 본인의 token을 씁니다. `"exchange"`: backend가 `authorization_servers`의 첫 서버를 신뢰합니다. mcp-fuse가 호출자의 token을 그곳에서 그 backend를 audience로 하는 token으로 교환하므로 아무도 연결하지 않습니다([인가](authorization.ko.md#호출자의-인가-서버를-신뢰하는-backend)). `"none"`: backend가 token을 요구하지 않습니다. |
+| `backends[].client_id` | 아니오 | `oauth` 전용. backend의 인가 서버에 mcp-fuse용으로 미리 등록한 client. 없으면 mcp-fuse가 스스로 등록([RFC 7591](https://www.rfc-editor.org/rfc/rfc7591))하고 결과를 기억합니다. |
+| `backends[].client_secret_file` | 아니오 | `oauth` 전용. 그 client가 confidential이면 그 secret이 든 파일. `client_id`가 필요합니다. |
+| `backends[].scope` | 아니오 | `exchange` 전용. 교환한 token을 요청할 때의 scope — 그 서버에서 backend를 token의 audience에 넣는 scope입니다. 기본값: backend의 protected resource metadata의 `scopes_supported`. |
 | `list_timeout_seconds` | 아니오 | `initialize`와 목록이 backend를 기다리는 시간. 기본 15. |
 
 `auth`는 모든 backend가 `"auth": "none"`일 때만 생략할 수 있습니다. 보관할 사람별 token이 없으면 식별할 사람도

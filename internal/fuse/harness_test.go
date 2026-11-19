@@ -48,7 +48,9 @@ type fakeAS struct {
 	lastToken      string
 	confidential   map[string]string // client_id -> secret, for pre-registered confidential clients
 	authMethods    []string
-	secretInBody   bool // accept client_secret_post instead of Basic
+	secretInBody   bool         // accept client_secret_post instead of Basic
+	exchanges      []url.Values // token exchange requests, as received
+	rejectExchange bool
 }
 
 type codeRec struct {
@@ -181,9 +183,33 @@ func (as *fakeAS) token(w http.ResponseWriter, r *http.Request) {
 		}
 		delete(as.refreshTokens, r.PostForm.Get("refresh_token")) // rotation: a refresh token is good once
 		issue(rec.sub, rec.resource, rec.clientID)
+	case grantTokenExchange:
+		// As a server does it: only an authenticated confidential client may exchange, and only a token issued for it.
+		form := url.Values{}
+		for k, v := range r.PostForm {
+			form[k] = append([]string(nil), v...)
+		}
+		as.exchanges = append(as.exchanges, form)
+		rec, ok := as.front[r.PostForm.Get("subject_token")]
+		if as.rejectExchange || !ok || r.PostForm.Get("client_id") != "fuse" || r.PostForm.Get("resource") == "" ||
+			r.PostForm.Get("subject_token_type") != tokenTypeAccess {
+			fail("invalid_request")
+			return
+		}
+		at := as.next("xt")
+		as.tokens[at] = tokRec{aud: r.PostForm.Get("resource"), sub: rec.sub}
+		as.lastToken = at
+		jsonrpc.WriteFrame(w, 200, map[string]any{"access_token": at, "token_type": "Bearer", "expires_in": as.expiresIn,
+			"issued_token_type": tokenTypeAccess})
 	default:
 		fail("unsupported_grant_type")
 	}
+}
+
+func (as *fakeAS) exchangeRequests() []url.Values {
+	as.mu.Lock()
+	defer as.mu.Unlock()
+	return append([]url.Values(nil), as.exchanges...)
 }
 
 func (as *fakeAS) introspect(w http.ResponseWriter, r *http.Request) {

@@ -4,9 +4,12 @@ A reverse proxy that presents several MCP servers as one. It does nothing else.
 
 ## Boundary
 - Toward the agent it is an ordinary MCP **resource server**: the token a caller presents is for mcp-fuse
-  (`resource` is its audience), is checked (`internal/front`), and is used for nothing else.
+  (`resource` is its audience), is checked (`internal/front`), and is used for nothing else - except as the subject of
+  a token exchange (RFC 8693) at the server that issued it, for a backend configured `exchange`
+  (`internal/fuse/exchange.go`).
 - Toward each backend it is an ordinary MCP **client** (`internal/oauthc`, `internal/fuse/backend.go`): it holds, per
-  person and per backend, a token issued by *that backend's own authorization server*, and its own MCP session.
+  person and per backend, a token issued by *that backend's own authorization server* - given by the person
+  (`oauth`) or exchanged for the caller's (`exchange`, held in memory only) - and its own MCP session.
 - It merges `initialize`, the lists (`tools`, `prompts`, `resources`) and routes the follow-up request
   (`tools/call`, `prompts/get`, `resources/read`) to the backend that listed the thing. Everything else is passed
   through untouched.
@@ -47,7 +50,8 @@ never rebuilds - keep it that way, or a release stops being what was published a
   its own `Authorization`, `X-Request-Id`. Never anything the caller supplied, never `X-Forwarded-*`. Do not turn
   this into a copy of the caller's headers.
 - The token a backend receives was issued by its own authorization server, for that person, with that backend as
-  the audience. The caller's token never reaches a backend.
+  the audience. The caller's token never reaches a backend; it goes only to the server that issued it, for an
+  exchange, and only for a backend whose metadata names that server.
 - Nothing a caller sent, a backend answered, or any token is logged: tool name, backend, latency, status only.
 - Grants are encrypted at rest; a connect state is used once; a connect link is a signed, short-lived ticket.
 - A ticket says whom a link was made for and proves nothing about who opens it. A connect stores a grant only after

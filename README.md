@@ -23,7 +23,8 @@ not changed.
 
 ### Connecting a backend
 
-A backend is connected once per person.
+A backend is connected once per person. A backend that trusts the authorization server agents log in at needs no
+connecting: mcp-fuse exchanges the agent's token there for one meant for the backend ([authorization](docs/authorization.md)).
 
 1. The agent calls `initialize`. For every backend the person has not connected, the instructions carry a link.
 2. The person opens the link in a browser and signs in at the authorization server agents log in at. That proves

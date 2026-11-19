@@ -40,16 +40,27 @@ type Backend struct {
 	Name string `json:"name"`
 	URL  string `json:"url"`
 	// Auth is "oauth" (default): mcp-fuse is an OAuth client of this backend's authorization server and holds a
-	// token per person. "none": the backend asks for no token.
+	// token per person, which the person gives once by connecting the backend. "exchange": the backend trusts the
+	// authorization server callers log in at, and mcp-fuse exchanges the caller's token there (RFC 8693) for one
+	// whose audience is the backend - nobody connects anything. "none": the backend asks for no token.
 	Auth string `json:"auth"`
 	// ClientID is the identity pre-registered for mcp-fuse at this backend's authorization server. Without it the
 	// client registers itself (RFC 7591). ClientSecretFile holds the secret of a confidential pre-registered client.
+	// Both are for "oauth" only: an exchange is made as the client of `auth`.
 	ClientID         string `json:"client_id"`
 	ClientSecretFile string `json:"client_secret_file"`
+	// Scope is what an "exchange" backend's token is asked for with. Empty: the scopes the backend's metadata lists.
+	Scope string `json:"scope"`
 }
 
-// OAuth says whether each person connects this backend. A backend configured "none" asks for no token.
-func (b Backend) OAuth() bool { return b.Auth != "none" }
+// OAuth says whether each person connects this backend.
+func (b Backend) OAuth() bool { return b.Auth == "oauth" }
+
+// Exchange says whether this backend's token is obtained by exchanging the caller's.
+func (b Backend) Exchange() bool { return b.Auth == "exchange" }
+
+// Token says whether this backend is sent a token at all. A backend configured "none" asks for none.
+func (b Backend) Token() bool { return b.Auth != "none" }
 
 // Load reads and validates the configuration file. An unknown key is an error.
 func Load(path string) (Config, error) {
@@ -110,7 +121,7 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("backends must list at least one backend")
 	}
 	names := map[string]bool{}
-	needsGrants := false
+	needsGrants, exchanges := false, false
 	for i := range c.Backends {
 		b := &c.Backends[i]
 		if b.Name == "" || strings.ContainsAny(b.Name, "/?# ") {
@@ -126,21 +137,29 @@ func (c *Config) Validate() error {
 		switch b.Auth {
 		case "":
 			b.Auth = "oauth"
-		case "oauth", "none":
+		case "oauth", "exchange", "none":
 		default:
-			return fmt.Errorf("backends[%s].auth must be \"oauth\" or \"none\", got %q", b.Name, b.Auth)
+			return fmt.Errorf("backends[%s].auth must be \"oauth\", \"exchange\" or \"none\", got %q", b.Name, b.Auth)
 		}
 		if b.ClientSecretFile != "" && b.ClientID == "" {
 			return fmt.Errorf("backends[%s].client_secret_file needs client_id", b.Name)
 		}
-		if b.OAuth() {
-			needsGrants = true
+		if !b.OAuth() && (b.ClientID != "" || b.ClientSecretFile != "") {
+			return fmt.Errorf("backends[%s]: client_id and client_secret_file are for auth \"oauth\" only", b.Name)
 		}
+		if !b.Exchange() && b.Scope != "" {
+			return fmt.Errorf("backends[%s].scope is for auth \"exchange\" only", b.Name)
+		}
+		needsGrants = needsGrants || b.OAuth()
+		exchanges = exchanges || b.Exchange()
 	}
 
 	if c.Auth.IntrospectionURL == "" {
 		if needsGrants {
 			return fmt.Errorf("auth.introspection_url is required: grants are kept per person, so callers must be identified")
+		}
+		if exchanges {
+			return fmt.Errorf("auth.introspection_url is required: a backend with auth \"exchange\" is given the caller's identity")
 		}
 	} else {
 		if _, err := httpURL("auth.introspection_url", c.Auth.IntrospectionURL); err != nil {
@@ -149,6 +168,9 @@ func (c *Config) Validate() error {
 		if c.Auth.ClientID == "" {
 			return fmt.Errorf("auth.client_id is required with auth.introspection_url")
 		}
+	}
+	if exchanges && c.Auth.ClientSecretFile == "" {
+		return fmt.Errorf("auth.client_secret_file is required: a token exchange is made by a confidential client")
 	}
 	if needsGrants && (c.StateFile == "" || c.SecretFile == "") {
 		return fmt.Errorf("state_file and secret_file are required when a backend uses oauth")

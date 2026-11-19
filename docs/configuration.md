@@ -18,15 +18,16 @@ A complete example is [`examples/config.json`](../examples/config.json).
 | `auth` | see below | How a caller's token is checked. |
 | `auth.introspection_url` | yes, with `auth` | An [RFC 7662](https://www.rfc-editor.org/rfc/rfc7662) endpoint. A token is accepted when it is active, names a subject, and has `resource` among its audiences. |
 | `auth.client_id` | yes, with `auth` | The OAuth client mcp-fuse is at that authorization server. It authenticates to the introspection endpoint and signs a person in when a backend is connected. |
-| `auth.client_secret_file` | no | File holding the client's secret. Without it the client is public and sends only its id. |
+| `auth.client_secret_file` | with an `exchange` backend | File holding the client's secret. Without it the client is public and sends only its id. A token exchange is made by a confidential client, so an `exchange` backend needs it. |
 | `state_file` | with an `oauth` backend | Where grants are kept, encrypted. Losing it means everyone connects again; nothing else depends on it. |
 | `secret_file` | with an `oauth` backend | At least 32 bytes. The key that encrypts `state_file` and the key that signs connect links are derived from it, each for its own purpose. |
 | `backends` | yes | The MCP servers to merge, in priority order (see below). |
 | `backends[].name` | yes | Unique. Shown in logs, in the instructions and in the connect link, so it must be free of `/`, `?`, `#` and spaces. |
 | `backends[].url` | yes | The backend's MCP endpoint (http or https). |
-| `backends[].auth` | no | `"oauth"` (default): each person connects the backend and mcp-fuse uses that person's own token. `"none"`: the backend asks for no token. |
-| `backends[].client_id` | no | A client pre-registered for mcp-fuse at the backend's authorization server. Without it mcp-fuse registers itself ([RFC 7591](https://www.rfc-editor.org/rfc/rfc7591)) and remembers the result. |
-| `backends[].client_secret_file` | no | File holding that client's secret, if it is confidential. Needs `client_id`. |
+| `backends[].auth` | no | `"oauth"` (default): each person connects the backend and mcp-fuse uses that person's own token. `"exchange"`: the backend trusts the first of `authorization_servers`; mcp-fuse exchanges the caller's token there for one whose audience is the backend, and nobody connects it ([authorization](authorization.md#backends-that-trust-the-callers-authorization-server)). `"none"`: the backend asks for no token. |
+| `backends[].client_id` | no | `oauth` only. A client pre-registered for mcp-fuse at the backend's authorization server. Without it mcp-fuse registers itself ([RFC 7591](https://www.rfc-editor.org/rfc/rfc7591)) and remembers the result. |
+| `backends[].client_secret_file` | no | `oauth` only. File holding that client's secret, if it is confidential. Needs `client_id`. |
+| `backends[].scope` | no | `exchange` only. The scope the exchanged token is asked for with — the one that puts the backend into a token's audience at that server. Default: the `scopes_supported` of the backend's protected resource metadata. |
 | `list_timeout_seconds` | no | How long `initialize` and the lists wait for the backends. Default 15. |
 
 `auth` may be left out only when every backend is `"auth": "none"`: with no per-person token to keep there is no one

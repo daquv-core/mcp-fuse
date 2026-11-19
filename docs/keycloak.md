@@ -157,6 +157,21 @@ would then open the backend directly, past mcp-fuse.
 
 Refresh tokens are on by default for a standard-flow client; leave them on.
 
+### 2.5a Or: no connecting at all (token exchange)
+
+The backends here trust the same realm agents log in at, so mcp-fuse can exchange the agent's token for each backend's
+instead of having each person connect it ([authorization](authorization.md#backends-that-trust-the-callers-authorization-server)).
+Then skip 2.5 and set:
+
+| Where | Set |
+|---|---|
+| `mcp-fuse` → *Settings* → *Capability config* | *Standard Token Exchange* On |
+| `mcp-fuse` → *Client scopes* → **Add client scope** | `orders`, `analytics`, added as **Optional** |
+
+The agent's token already names `mcp-fuse` in its audience (2.3), which Keycloak requires of a token the client
+exchanges. In section 3, give each backend `"auth": "exchange"` and its `"scope"` instead of `client_id` and
+`client_secret_file`; `state_file` and `secret_file` are then not needed.
+
 ### 2.6 Agents
 
 An agent is a client of the realm. Create its client after 2.3 so that it gets the `mcp-fuse` scope.
@@ -213,4 +228,5 @@ Each backend is a resource server of the same realm ([adding your MCP server](ba
 | The attributes | Either token above | `tenant_id` is there, and the user cannot change it on their account page |
 | Introspection | `curl -u mcp-fuse:<secret> -d token=<an agent's token> <introspection_url>` | `"active": true` and the `aud` above |
 | Connecting | Connect the agent; open the link `initialize` gives; sign in | The backend's tools appear in the agent's list |
+| Exchanging (2.5a) | Connect the agent | The backend's tools appear at once; `initialize` gives no link |
 | Refusals | Present a backend's token to mcp-fuse, and an agent's token to a backend | Both are refused with `401` |

@@ -23,7 +23,8 @@ AI エージェント（ChatGPT、Gemini、Claude、社内の AI アシスタン
 
 ### backend を接続する
 
-backend は人ごとに 1 回接続します。
+backend は人ごとに 1 回接続します。エージェントがログインする認可サーバーを信頼する backend は接続が要りません。
+mcp-fuse がそこでエージェントのトークンをその backend 用のトークンに交換します（[認可](docs/authorization.ja.md)）。
 
 1. エージェントが `initialize` を呼びます。その人がまだ接続していない backend ごとに、instructions にリンクが
    含まれます。
